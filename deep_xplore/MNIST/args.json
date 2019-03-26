@@ -1,0 +1,10 @@
+{
+  "transformation": "light",
+  "weight_diff": 2.5,
+  "weight_nc": 0.5,
+  "step": 0.5,
+  "seeds": 10,
+  "grad_iterations": 20,
+  "threshold": 1.5,
+  "target_model": 0
+}

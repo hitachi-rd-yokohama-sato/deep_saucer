@@ -1,0 +1,11 @@
+{
+  "input_placeholder": {
+    "name": "XOR:0",
+    "shape": "(?, 3)",
+    "description": "[\"value_1\", \"value_2\", \"value_3\"]"
+  },
+  "output_node": {
+    "name": "Cast:0",
+    "shape": "(?, 1)"
+  }
+}

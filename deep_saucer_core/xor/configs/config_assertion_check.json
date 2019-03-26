@@ -1,0 +1,4 @@
+{
+  "NameList": "../../downloaded_data/tf_xor_assertion/train_name.json",
+  "Prop": "../../../assertion_testing/examples/xor/express/express.txt"
+}

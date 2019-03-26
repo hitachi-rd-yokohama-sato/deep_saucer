@@ -1,0 +1,15 @@
+{
+  "rule": "/Any/Path/reference_model/lib/reference_models/RefModColSha-v2.txt",
+  "rdg_exe":
+  [
+    "/Any/Path/reference_model/lib/option_functions/classification_object_color.py",
+    "/Any/Path/reference_model/lib/option_functions/classification_object_shape.py"
+  ],
+  "function_names":
+  [
+    "get_color",
+    "get_shape"
+  ],
+  "rdg_weight": "/Any/Path/reference_model/lib/reference_models/evaluation_criteria_1.txt",
+  "rdg_output": "/Any/Path/reference_model/lib/tables/field_names_3.csv"
+}

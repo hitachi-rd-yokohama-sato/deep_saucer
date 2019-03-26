@@ -1,0 +1,20 @@
+{
+  "input_placeholder": {
+    "name": "XOR:0",
+    "shape": "(?, 3)",
+    "description": "[\"value_1\", \"value_2\", \"value_3\"]"
+  },
+  "hidden_node": {
+    "name": "layer1:0",
+    "shape": "(3, 16)",
+    "weight": "weight1:0",
+    "bias": "bias1:0",
+    "description": "[\"l1_0\", \"l1_1\"]"
+  },
+  "output_node": {
+    "name": "layer2:0",
+    "shape": "(?, 1)",
+    "weight": "weight2:0",
+    "bias": "bias2:0"
+  }
+}

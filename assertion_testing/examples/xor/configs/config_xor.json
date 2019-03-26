@@ -1,0 +1,5 @@
+{
+  "NameList": "../model/train_name.json",
+  "Prop": "../express/express.txt",
+  "NumTest": 8
+}

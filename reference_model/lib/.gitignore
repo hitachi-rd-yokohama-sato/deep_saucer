@@ -1,0 +1,12 @@
+.idea/
+__pycache__
+GTSRB_data/
+MNIST_data/
+tensorboard/
+input_data/
+/input_data
+/experiments
+experiments/
+traffic_signs.db
+html/images/*
+html/report*.html

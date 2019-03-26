@@ -1,0 +1,7 @@
+{
+  "NameList": "../../downloaded_data/mnist_tensorflow_metamorphic/model_mnist.ckpt_name.json",
+  "CompOp": "==",
+  "Decimals": 6,
+  "Lap": 10,
+  "NumTest": 100
+}

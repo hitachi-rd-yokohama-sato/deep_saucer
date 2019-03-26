@@ -1,0 +1,5 @@
+{
+  "NameList": "../../downloaded_data/tf_xor_dnn_encoding/train_name.json",
+  "Prop": "../../../dnn_encoding/examples/xor/express/express_sat.txt",
+  "Condition": "../../../dnn_encoding/examples/xor/condition/condition.txt"
+}
