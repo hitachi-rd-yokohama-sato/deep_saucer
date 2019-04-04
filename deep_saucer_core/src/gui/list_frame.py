@@ -170,16 +170,36 @@ class BaseListFrame(Frame):
 
 def apply_env_id(list_frame, env_id):
     list_frame.init_bg_color()
+    # once -> int, other -> str
     list_of_items = list_frame.get_items()
 
+    # apply bg color
     for item_id in list_of_items:
-        if list_frame.get_item_value(item_id, 1) is not env_id:
+        # item_value = env_id
+        item_value = list_frame.get_item_value(item_id, 1)
+
+        if isinstance(item_value, int):
+            # ex) 1 -> ['1']
+            item_value = [str(item_value)]
+
+        else:
+            # ex)'1 2 3' -> ['1', '2', '3']
+            item_value = item_value.split()
+
+        if len(set(item_value) & set(env_id)) == 0:
             list_frame.set_bg_color(item_id, DISABLE_COLOR)
 
     for item_id in list_frame.get_selection():
+        # DISABLE item remove selection
         bg_color = list_frame.get_bg_color(item_id)
         if str(bg_color) == DISABLE_COLOR:
             list_frame.selection_remove(item_id)
+
+    if len(list_frame.get_selection()):
+        # Not select item is DISABLE
+        for item_id in list_of_items:
+            if item_id not in list_frame.get_selection():
+                list_frame.set_bg_color(item_id, DISABLE_COLOR)
 
 
 class TestFuncListFrame(BaseListFrame):

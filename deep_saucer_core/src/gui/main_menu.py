@@ -9,11 +9,11 @@
 # March 1st, 2019 : First version.
 #******************************************************************************************
 import os
-from tkinter import filedialog, Menu, DISABLED, NORMAL
+from tkinter import filedialog, Menu, DISABLED, NORMAL, BROWSE
 
 from conf.configuration import (
-    ENV_SETUP_SCRIPT_M_LABEL, DATA_SCRIPT_LABEL, MODEL_SCRIPT_LABEL,
-    TEST_FUNC_LABEL, SHOW_ENV_SETUP_M_LABEL,
+    ADD_ENV_SETUP_SCRIPT_LABEL, ADD_DATA_SCRIPT_LABEL, ADD_MODEL_SCRIPT_LABEL,
+    ADD_TEST_FUNC_LABEL, SHOW_ENV_SETUP_M_LABEL,
     RUN_TEST_FUNC, RUN, HELP, SHOW_ENV_SETUP_WIZARD_TITLE,
     ENV_SETUP_WIZARD_TITLE, ADD_NEW_SCRIPT_MSG, INFO, ERROR, ALREADY_SCRIPT_MSG,
     DATA_SCRIPT_WIZARD_TITLE, MODEL_SCRIPT_WIZARD_TITLE, TEST_FUNC_WIZARD_TITLE,
@@ -36,17 +36,14 @@ class MainMenu(Menu):
         self.__menu_file = Menu(self, tearoff=False)
 
         # regist env
-        self.__menu_file.add_command(label=ENV_SETUP_SCRIPT_M_LABEL,
+        self.__menu_file.add_command(label=ADD_ENV_SETUP_SCRIPT_LABEL,
                                      command=self.__regist_env_setup_script)
-
-        self.__menu_file.add_separator()
-
         # regist script
-        self.__menu_file.add_command(label=DATA_SCRIPT_LABEL,
+        self.__menu_file.add_command(label=ADD_DATA_SCRIPT_LABEL,
                                      command=self.__regist_data_script)
-        self.__menu_file.add_command(label=MODEL_SCRIPT_LABEL,
+        self.__menu_file.add_command(label=ADD_MODEL_SCRIPT_LABEL,
                                      command=self.__regist_model_script)
-        self.__menu_file.add_command(label=TEST_FUNC_LABEL,
+        self.__menu_file.add_command(label=ADD_TEST_FUNC_LABEL,
                                      command=self.__regist_test_func_script)
 
         self.__menu_file.add_separator()
@@ -84,16 +81,18 @@ class MainMenu(Menu):
         try:
             self.__main_window.is_running = True
             self.__menu_file.entryconfig(0, state=DISABLED)
-            self.__menu_file.entryconfig(6, state=DISABLED)
+            self.__menu_file.entryconfig(7, state=DISABLED)
 
             env_setup_wizard = EnvSetupWizard(master=self.master,
+                                              select_mode=BROWSE,
                                               view_mode=True, size=12)
-            show_wizard(env_setup_wizard,
-                        SHOW_ENV_SETUP_WIZARD_TITLE, modal=False)
+
+            show_wizard(wizard=env_setup_wizard,
+                        title=SHOW_ENV_SETUP_WIZARD_TITLE, modal=False)
 
         finally:
             self.__menu_file.entryconfig(0, state=NORMAL)
-            self.__menu_file.entryconfig(6, state=NORMAL)
+            self.__menu_file.entryconfig(7, state=NORMAL)
             self.__main_window.is_running = False
 
     def __regist_env_setup_script(self):
@@ -138,14 +137,13 @@ class MainMenu(Menu):
                 env_setup_wizard = EnvSetupWizard(master=self.master, size=12)
                 show_wizard(wizard=env_setup_wizard, title=ENV_SET_WIZARD_TITLE)
 
-                if env_setup_wizard.env_setup_id < 0:
-                    return
-
                 env_id = env_setup_wizard.env_setup_id
 
+                if len(env_id) == 0:
+                    return
+
                 # Check if it is already registed
-                data_script = DataScriptInfo.get_data_with_path_eid(
-                    path=file_path, env_id=env_id)
+                data_script = DataScriptInfo.get_data_with_path(path=file_path)
                 if data_script is None:
                     # Add Data
                     data_script = DataScript(path=file_path, env_id=env_id)
@@ -184,14 +182,13 @@ class MainMenu(Menu):
                 env_setup_wizard = EnvSetupWizard(master=self.master, size=12)
                 show_wizard(wizard=env_setup_wizard, title=ENV_SET_WIZARD_TITLE)
 
-                if env_setup_wizard.env_setup_id < 0:
-                    return
-
                 env_id = env_setup_wizard.env_setup_id
 
+                if len(env_id) == 0:
+                    return
+
                 # Check if it is already registed
-                model = ModelScriptInfo.get_data_with_path_eid(
-                    path=file_path, env_id=env_id)
+                model = ModelScriptInfo.get_data_with_path(path=file_path)
                 if model is None:
                     # Add Model Load
                     model = ModelScript(path=file_path, env_id=env_id)
@@ -229,10 +226,10 @@ class MainMenu(Menu):
                 env_setup_wizard = EnvSetupWizard(master=self.master, size=12)
                 show_wizard(wizard=env_setup_wizard, title=ENV_SET_WIZARD_TITLE)
 
-                if env_setup_wizard.env_setup_id < 0:
-                    return
-
                 env_id = env_setup_wizard.env_setup_id
+
+                if len(env_id) == 0:
+                    return
 
                 # Check if it is already registed
                 test_func = TestFuncInfo.get_data_with_path(path=file_path)

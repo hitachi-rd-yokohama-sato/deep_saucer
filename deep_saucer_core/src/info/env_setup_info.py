@@ -53,6 +53,10 @@ class EnvSetupInfo(object):
         return cls.__data_dict.values()
 
     @classmethod
+    def data_keys(cls):
+        return cls.__data_dict.keys()
+
+    @classmethod
     def max_id(cls):
         if len(cls.__data_dict) == 0:
             return -1

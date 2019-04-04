@@ -71,9 +71,9 @@ class DataScriptInfo(object):
             return cls.__data_dict[key]
 
     @classmethod
-    def get_data_with_path_eid(cls, path, env_id):
+    def get_data_with_path(cls, path):
         values = [value for value in cls.data_values() if
-                  value.abs_path == path and value.env_id == env_id]
+                  value.abs_path == path]
         if len(values) > 0:
             return values[0]
         else:
@@ -113,7 +113,10 @@ class DataScript(BaseData):
 
         BaseData.__init__(self, identifier=identifier, path=path)
 
-        self.__env_id = env_id
+        if not isinstance(env_id, list):
+            self.__env_id = [env_id]
+        else:
+            self.__env_id = sorted(env_id)
 
     @property
     def data_tuple(self):
@@ -122,6 +125,10 @@ class DataScript(BaseData):
     @property
     def env_id(self):
         return self.__env_id
+
+    @env_id.setter
+    def env_id(self, value):
+        self.__env_id = value
 
     @env_id.deleter
     def env_id(self):

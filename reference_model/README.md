@@ -119,7 +119,7 @@ Practical Example using GTSRB material: [examples/gtsrb/run_gtsrb.py](examples/g
 ---
 * Tutorial using GTSRB
 
-Execute from?DeepSaucer?assuming the following directory structure
+Execute from DeepSaucer assuming the following directory structure
 ```text
 Any Directory
 |-- deep_saucer_core
@@ -141,18 +141,18 @@ Any Directory
 **※ Placing test data created by common operation in `deep_saucer_core/downloaded_data`**
 
 1. Start `DeepSaucer`
-1. Select `File` - `Env Setup Script`
+1. Select `File` - `Add Env Setup Script`
     1. Select [lib/reference_model_setup.sh](lib/reference_model_setup.sh)
-1. Select `File` - `Dataset Load Script`
+1. Select `File` - `Add Test Dataset Load Script`
    1. Select `deep_saucer_core/gtsrb/data/dataset_ref_model.py`
    1. Select the `Env Setup Script` selected above
-1. Select `File` - `Model Load Script`
+1. Select `File` - `Add Model Load Script`
    1. Select `deep_saucer_core/gtsrb/model/model_ref_model.py`
    1. Select the `Env Setup Script` selected above
-1. Select `File` - `Verification Script`
+1. Select `File` - `Add Verification Script`
    1. Select [lib/ref_model_verification.py](lib/ref_model_verification.py)
    1. Select the `Env Setup Script` selected above
-1. Select the 3 scripts (`Dataset Load`, `Model Load`, and `Verification`) selected above on DeepSaucer
+1. Select the 3 scripts (`Test Dataset Load`, `Model Load`, and `Verification`) selected above on DeepSaucer
    1. Select `Run` - `Run Test Function`
    1. Select`Next`
    1. Press `Select`, and select [lib/configs/config_gtsrb.json](lib/configs/config_gtsrb.json)

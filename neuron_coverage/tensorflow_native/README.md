@@ -1,9 +1,9 @@
 # DNN Coverage
 
-Calculate the neuron coverage for the input dataset given by the user, and display it in the form of a heat map. 
-After that, a gradient for the input dataset is computed by backpropagation. Based on the gradient, the most efficient manipulation to input values 
-in order for the neuron coverage to increase is selected. A number of data is removed from the dataset, and 
-these removed data are converted to new data by the selected manipulation. Then, the new data is added to the dataset, 
+Calculate the neuron coverage for the input dataset given by the user, and display it in the form of a heat map.
+After that, a gradient for the input dataset is computed by backpropagation. Based on the gradient, the most efficient manipulation to input values
+in order for the neuron coverage to increase is selected. A number of data is removed from the dataset, and
+these removed data are converted to new data by the selected manipulation. Then, the new data is added to the dataset,
 and the coverage is recalculated by running the model with the updated dataset. Similarly, a gradient for the updated dataset is computed.
 These processes are repeated until the target coverage rate is achieved. Data manipulation algorithm is implemented by the user in Python.
 
@@ -20,7 +20,7 @@ These processes are repeated until the target coverage rate is achieved. Data ma
 * When invoked from DeepSaucer: [1. Common operation](#1-common-operation) → [3. Invoking from DeepSaucer](#3-invoking-from-deepsaucer) → [4. Output](#4-output)
 
 ### 1. Common Operation
-1. Implement a class and its method 'get_atomic_manipulations' in [/config/implement.py](lib/config/implement.py), which manipulates a given input value 
+1. Implement a class and its method 'get_atomic_manipulations' in [/config/implement.py](lib/config/implement.py), which manipulates a given input value
 
 1. Create the config file
   * Set the coverage function setting information in json format ([lib/config/config.json](lib/config/config.json))
@@ -88,7 +88,7 @@ ex ) [neuron_coverage/tensorflow_native/lib/coverage_verification.py](lib/covera
 
 ### 3. Invoking from DeepSaucer
 
-Execute from?DeepSaucer?assuming the following directory structure
+Execute from DeepSaucer assuming the following directory structure
 ```text
 Any Directory
 |-- deep_saucer_core
@@ -112,18 +112,18 @@ Any Directory
 ```
 
 1. Start `DeepSaucer`
-1. Select `File` - `Env Setup Script`
+1. Select `File` - `Add Env Setup Script`
     1. Select [neuron_coverage_tensorflow_native.sh](lib/neuron_coverage_tensorflow_native.sh)
-1. Select`File` - `Dataset Load Script`
+1. Select`File` - `Add Test Dataset Load Script`
    1. Select `deep_saucer_core/mnist/data/dataset_neuron_coverage_tensorflow_native.py`
    1. Select the `Env Setup Script` selected above
-1. Select `File` - `Model Load Script`
+1. Select `File` - `Add Model Load Script`
    1. Select `deep_saucer_core/mnist/model/model_neuron_coverage_tensorflow_native.py`
    1. Select the `Env Setup Script` selected above
-1. Select `File` - `Verification Script`
+1. Select `File` - `Add Verification Script`
    1. Select [lib/coverage_verification.py](lib/coverage_verification.py)
    1. Select the `Env Setup Script` selected above
-1. Select the 3 scripts (`Dataset Load`, `Model Load`, and `Verification`) selected above on DeepSaucer
+1. Select the 3 scripts (`Test Dataset Load`, `Model Load`, and `Verification`) selected above on DeepSaucer
    1. Select `Run` - `Run Test Function`
    1. Select `Next`
    1. Press`Select` and select [lib/config/config.json](lib/config/config.json)

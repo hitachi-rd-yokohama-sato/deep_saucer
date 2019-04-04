@@ -27,7 +27,7 @@ SP_SCREEN_HEIGHT = 0.2*1.5
 MAIN_WINDOW_WIDTH = 0.6
 MAIN_WINDOW_HEIGHT = 0.75
 
-DISABLE_COLOR = 'gray'
+DISABLE_COLOR = 'gray66'
 SELECTED_COLOR = 'light gray'
 BLACK = 'black'
 GOLDENROD = 'goldenrod'
@@ -54,6 +54,8 @@ WM_DELETE_WINDOW = 'WM_DELETE_WINDOW'
 ESCAPE_EVENT = '<Escape>'
 TREE_VIEW_SELECT_EVENT = '<<TreeviewSelect>>'
 KEY_RELEASE_EVENT = '<KeyRelease>'
+L_DOUBL_CLICK_EVENT = '<Double-Button-1>'
+ENTER_KEY_EVENT = '<Return>'
 
 TEST_FUNC_HEADERS = [' ID ', 'ENV ID', '   Name   ', '   Path   ']
 MODEL_HEADERS = [' ID ', 'ENV ID', '   Name   ', '   Path   ']
@@ -61,8 +63,8 @@ DATA_HEADERS = [' ID ', 'ENV ID', '   Name   ', '   Path   ']
 ENV_SETUP_HEADERS = [' ID ', '   Name   ', '   Path   ']
 
 # Label and Title
-ENV_SETUP_SCRIPT_M_LABEL = 'Env Setup Script'
-SHOW_ENV_SETUP_M_LABEL = 'Show %s' % ENV_SETUP_SCRIPT_M_LABEL
+ENV_SETUP_LABEL = 'Env Setup Script'
+SHOW_ENV_SETUP_M_LABEL = 'Show %s' % ENV_SETUP_LABEL
 SELECT_CONF_LABEL = \
     'Configuration file is not spcecified.\n' \
     'To specify the configuration file, select "Next".\n' \
@@ -72,15 +74,22 @@ RUN_TEST_FUNC = 'Run Test Function'
 STOP_TEST_FUNC = 'Stop Test Function'
 DELETE_SCRIPTS = 'Delete Scripts'
 TEST_FUNC_LABEL = 'Verification Script'
-DATA_SCRIPT_LABEL = 'Dataset Load Script'
+DATA_SCRIPT_LABEL = 'Test Dataset Load Script'
 MODEL_SCRIPT_LABEL = 'Model Load Script'
+COMMENT_LABEL = '* Double click to edit the linked Env Setup Scripts'
 
-SHOW_ENV_SETUP_WIZARD_TITLE = 'Registered %s' % ENV_SETUP_SCRIPT_M_LABEL
-ENV_SETUP_WIZARD_TITLE = 'Select EnvSetup Script'
+ADD_ENV_SETUP_SCRIPT_LABEL = 'Add %s' % ENV_SETUP_LABEL
+ADD_TEST_FUNC_LABEL = 'Add %s' % TEST_FUNC_LABEL
+ADD_MODEL_SCRIPT_LABEL = 'Add %s' % MODEL_SCRIPT_LABEL
+ADD_DATA_SCRIPT_LABEL = 'Add %s' % DATA_SCRIPT_LABEL
+
+SHOW_ENV_SETUP_WIZARD_TITLE = 'Registered %s' % ENV_SETUP_LABEL
+ENV_SETUP_WIZARD_TITLE = 'Select %s' % ENV_SETUP_LABEL
 DATA_SCRIPT_WIZARD_TITLE = 'Select %s' % DATA_SCRIPT_LABEL
 MODEL_SCRIPT_WIZARD_TITLE = 'Select %s' % MODEL_SCRIPT_LABEL
 TEST_FUNC_WIZARD_TITLE = 'Select %s' % TEST_FUNC_LABEL
 ENV_SET_WIZARD_TITLE = 'Select Execute Env'
+ENV_EDIT_WIZARD_TITLE = 'Environment Edit Wizard (%s)'
 
 OK = 'OK'
 CANCEL = 'Cancel'
@@ -88,6 +97,8 @@ NEXT = 'Next'
 PREV = 'Prev'
 SELECT = 'Select'
 VIEW = 'View'
+ADD = 'Add'
+DEL = 'Delete'
 
 # Message
 ADD_NEW_SCRIPT_MSG = 'Add New Script (%s)'
@@ -113,6 +124,9 @@ HELP = 'Help'
 INFO = 'info'
 WARN = 'warn'
 ERROR = 'error'
+
+LINKED_ENV = 'Linked Env Setup'
+NON_LINKED_ENV = 'Non-linked Env Setup'
 
 LINUX_OS = 'posix'
 

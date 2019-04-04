@@ -127,7 +127,11 @@ class TestFunc(BaseData):
 
         BaseData.__init__(self, identifier=identifier, path=path)
 
-        self.__env_id = env_id
+        if not isinstance(env_id, list):
+            self.__env_id = [env_id]
+        else:
+            self.__env_id = sorted(env_id)
+
         if conf_path:
             self.__conf_path = conf_path
         else:
@@ -140,6 +144,10 @@ class TestFunc(BaseData):
     @property
     def env_id(self):
         return self.__env_id
+
+    @env_id.setter
+    def env_id(self, value):
+        self.__env_id = value
 
     @env_id.deleter
     def env_id(self):

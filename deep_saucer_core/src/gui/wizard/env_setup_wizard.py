@@ -9,11 +9,11 @@
 # March 1st, 2019 : First version.
 #******************************************************************************************
 from tkinter import (
-    Toplevel, Button, BOTH, NW, YES, TOP, NE, RIGHT, BROWSE, ACTIVE,
-    DISABLED)
+    Toplevel, Button, BOTH, NW, YES, TOP, NE, RIGHT, ACTIVE,
+    DISABLED, EXTENDED)
 
 from conf.configuration import (
-    ENV_SETUP, ENV_SETUP_HEADERS, TREE_VIEW_SELECT_EVENT, OK, CANCEL)
+    ENV_SETUP_LABEL, ENV_SETUP_HEADERS, TREE_VIEW_SELECT_EVENT, OK, CANCEL)
 from src.com.common import get_geometry
 from src.gui.list_frame import BaseListFrame
 from src.info.env_setup_info import EnvSetupInfo
@@ -21,7 +21,7 @@ from src.info.env_setup_info import EnvSetupInfo
 
 class EnvSetupWizard(Toplevel):
 
-    def __init__(self, master=None, view_mode=False,
+    def __init__(self, master=None, view_mode=False, select_mode=EXTENDED,
                  width=0.2, height=0.45, size=10, use_factor=True):
 
         Toplevel.__init__(self, master=master)
@@ -33,7 +33,8 @@ class EnvSetupWizard(Toplevel):
         # self.maxsize(int(w), int(h))
 
         # EnvSetup List
-        self.__env_setup_frame = EnvListFrame(self, size=size)
+        self.__env_setup_frame = EnvListFrame(
+            self, select_mode=select_mode, size=size)
 
         # Pack widget
         self.__env_setup_frame.pack(fill=BOTH, anchor=NW, expand=YES, side=TOP)
@@ -53,7 +54,7 @@ class EnvSetupWizard(Toplevel):
             self.__cancel_btn.pack(anchor=NE, side=RIGHT, padx=5, pady=5)
             self.__ok_btn.pack(anchor=NE, side=RIGHT, padx=5, pady=5)
 
-        self.__env_setup_id = -1
+        self.__env_setup_id = []
 
     def __check_select(self, event):
         if len(event.widget.selection()) > 0:
@@ -64,12 +65,16 @@ class EnvSetupWizard(Toplevel):
 
     def __select_ok(self):
         # "selectmode" is "BROWSE", so selected only one
-        for item_id in self.__env_setup_frame.get_selection():
-            self.__env_setup_id = self.__env_setup_frame.get_item_value(
-                item_id=item_id, index=0)
+        self.__env_setup_id = [
+            self.__env_setup_frame.get_item_value(item_id=item_id, index=0)
+            for item_id in self.__env_setup_frame.get_selection()]
+        # for item_id in self.__env_setup_frame.get_selection():
+        #     self.__env_setup_id = self.__env_setup_frame.get_item_value(
+        #         item_id=item_id, index=0)
         self.destroy()
 
     def __select_cancel(self):
+        self.__env_setup_id = []
         self.destroy()
 
     @property
@@ -78,9 +83,9 @@ class EnvSetupWizard(Toplevel):
 
 
 class EnvListFrame(BaseListFrame):
-    def __init__(self, root=None, size=10):
+    def __init__(self, root=None, select_mode=EXTENDED, size=10):
         values = EnvSetupInfo.data_values()
 
-        BaseListFrame.__init__(self, root=root, label=ENV_SETUP,
+        BaseListFrame.__init__(self, root=root, label=ENV_SETUP_LABEL,
                                columns=ENV_SETUP_HEADERS, values=values,
-                               select_mode=BROWSE, size=size)
+                               select_mode=select_mode, size=size)

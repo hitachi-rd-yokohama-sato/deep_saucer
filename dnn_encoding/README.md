@@ -1,5 +1,5 @@
 # DNN Encoding
-Verifying whether the input value and the output value satisfy a specific property, by converting DNN into a logical expression and 
+Verifying whether the input value and the output value satisfy a specific property, by converting DNN into a logical expression and
 solving it with the SMT solver. This tool supports only Multilayer Perceptrons
 
 ## Requirement
@@ -66,7 +66,7 @@ solving it with the SMT solver. This tool supports only Multilayer Perceptrons
           }
         }
         ```
-        **json Structure **
+        **json Structure**
         * **input_placeholder**
 
             | Name | Value | Description |
@@ -196,12 +196,12 @@ Any Directory
 ```
 
 1. Start `DeepSaucer`
-1. Select `File` - `Env Setup Script`
+1. Select `File` - `Add Env Setup Script`
     1. Select [lib/dnn_encoding_setup.sh](lib/dnn_encoding_setup.sh)
-1. Select `File` - `Model Load Script`
+1. Select `File` - `Add Model Load Script`
    1. Select `deep_saucer_core/xor/model/model_dnn_encoding.py`
    1. Select `Env Setup Script` selected above
-1. Select `File` - `Verification Script`
+1. Select `File` - `Add Verification Script`
    1. Select [lib/dnn_encoding_verification.py](lib/dnn_encoding_verification.py)
    1. Select `Env Setup Script` selected above
 1. Select the 3 scripts of `Model Load`, `Verification` selected above on DeepSaucer

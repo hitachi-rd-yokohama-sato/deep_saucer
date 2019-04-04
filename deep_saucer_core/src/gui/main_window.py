@@ -14,7 +14,9 @@ from tkinter.font import BOLD
 
 from tkinter.scrolledtext import ScrolledText
 from tkinter import (
-    ttk, Frame, BOTH, NW, YES, HORIZONTAL, SE, TOP, NORMAL, END, DISABLED)
+    ttk, Frame, Label,
+    BOTH, NW, NE, YES, HORIZONTAL, SE, TOP, RIGHT, NORMAL, END, DISABLED
+)
 
 from conf.configuration import (
     DETERMINATE, INFO, WARN, ERROR, BLACK, GOLDENROD, RED,
@@ -22,7 +24,7 @@ from conf.configuration import (
     VALUE, SELECT_USE_CONF_LABEL,
     NOT_SELECTED_ANACONDA_MSG, CREATE_ENV_MSG,
     CANCEL_MSG, ANACONDA_DIR, TOOL_NAME, DATA_SCRIPT_LABEL, MODEL_SCRIPT_LABEL,
-    TEST_FUNC_LABEL, CONSOLE_FONT_NAME)
+    TEST_FUNC_LABEL, CONSOLE_FONT_NAME, FONT_NAME, COMMENT_LABEL)
 
 from src.com.common import (
     cmd_exec_run_posix, show_wizard, get_geometry, create_env,
@@ -46,9 +48,15 @@ class MainWindow(Frame):
         self.__root.minsize(int(w), int(h))
         self.lift()
 
+        # select frame
         self.__test_select_frame = TestSelectFrame(self)
         self.__test_select_frame.pack(fill=BOTH, anchor=NW, expand=YES,
                                       padx=5, pady=5)
+
+        # comment label
+        comment_label = Label(self, text=COMMENT_LABEL,
+                              font=(FONT_NAME, size-2, BOLD))
+        comment_label.pack(anchor=NE, padx=5, pady=0)
 
         # console
         self.__console = ScrolledText(self, font=(CONSOLE_FONT_NAME, size),
@@ -201,7 +209,15 @@ class MainWindow(Frame):
                 self.c_println('Not used configuration file', mode=INFO)
 
             # Create Execute Environment
-            env_setup = EnvSetupInfo.get_data(test_func.env_id)
+            if data_script:
+                env_id = min(set(test_func.env_id) &
+                             set(model_script.env_id) &
+                             set(data_script.env_id))
+            else:
+                env_id = min(set(test_func.env_id) &
+                             set(model_script.env_id))
+
+            env_setup = EnvSetupInfo.get_data(env_id)
 
             env_python_dir = self.__create_env(script_path=env_setup.abs_path)
 

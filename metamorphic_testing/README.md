@@ -149,18 +149,18 @@ Any Directory
 ```
 
 1. Start `DeepSaucer`
-1. Selct `File` - `Env Setup Script`
+1. Selct `File` - `Add Env Setup Script`
     1. Select [lib/metamorphic_testing_setup.sh](lib/metamorphic_testing_setup.sh)
-1. Select `File` - `Dataset Load Script`
+1. Select `File` - `Add Test Dataset Load Script`
    1. Select `deep_saucer_core/mnist/data/dataset_metamorphic.py`
    1. Select the `Env Setup Script` selected above
-1. Select `File` - `Model Load Script`
+1. Select `File` - `Add Model Load Script`
    1. Select `deep_saucer_core/mnist/model/model_metamorphic.py`
    1. Select the `Env Setup Script` selected above
-1. Select `File` - `Verification Script`
+1. Select `File` - `Add Verification Script`
    1. Select [lib/metamorphic_verification.py](lib/metamorphic_verification.py)
    1. Select the `Env Setup Script` selected above
-1. Select the 3 scripts (`Dataset Load`, `Model Load`, and `Verification`) selected above on DeepSaucer
+1. Select the 3 scripts (`Test Dataset Load`, `Model Load`, and `Verification`) selected above on DeepSaucer
    1. Select `Run` - `Run Test Function`
    1. Select `Next`
    1. Press `Select`, and then select `deep_saucer_core/mnist/configs/config_metamorphci.json`

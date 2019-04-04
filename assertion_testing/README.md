@@ -126,7 +126,7 @@ main(sess, dataset, config_path)
 | Parameters | Type | Description |
 | --- | --- | --- |
 | sess | Session | Graph Session Created by Tensorflow |
-| dataset | List | Data Set Used for Testing |
+| dataset | List | Dataset Used for Testing |
 | conf_path | String | Config File Path used for Test |
 
 ```python
@@ -175,18 +175,18 @@ Any Directory
         `-- assertion_check_verification.py
 ```
 1. Start `DeepSaucer`
-1. Select `File` - `Env Setup Script`
+1. Select `File` - `Add Env Setup Script`
     1. Select [lib/assertion_testing_setup.sh](lib/assertion_testing_setup.sh)
-1. Select `File` - `Dataset Load Script`
+1. Select `File` - `Add Test Dataset Load Script`
    1. Select `deep_saucer_core/xor/data/dataset_assertion.py`
    1. Select `Env Setup Script` selected above
-1. Select `File` - `Model Load Script`
-   1. Select `deep_saucer_core/xor/model/model_assertion.py`
+1. Select `File` - `Add Model Load Script`
+   1. Select `deep_saucer_core/xor/model/model_assertion_check.py`
    1. Select `Env Setup Script` selected above
-1. Select `File` - `Verification Script`
+1. Select `File` - `Add Verification Script`
    1. Select [lib/assertion_check_verification.py](lib/assertion_check_verification.py)
    1. Select `Env Setup Script` selected above
-1. Select the 3 scripts selected above on `Dataset Load`, `Model Load`, and `Verification`
+1. Select the 3 scripts selected above on `Test Dataset Load`, `Model Load`, and `Verification`
    1. Select `Run` - `Run Test Function`
    1. Select `Next`
    1. Press Select `Select` to select `deep_saucer_core/xor/configs/config_assertion_check.json`
