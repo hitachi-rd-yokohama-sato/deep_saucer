@@ -1,7 +1,7 @@
-This distribution includes eight independent software programs in the folders 'deep_saucer_core', 'reference_model', 'neuron_coverage', 'dnn_encoding', 'assertion_testing', 'metamorphic_testing', 'deep_xplore', and 'safecv'.
+This distribution includes eight independent software programs in the folders 'deep_saucer_core', 'reference_model', 'neuron_coverage', 'dnn_encoding', 'xgb_encoding', 'assertion_testing', 'metamorphic_testing', 'deep_xplore', and 'safecv'.
 
 ----
-The files under the folders 'deep_saucer_core' and 'dnn_encoding' are:
+The files under the folders 'deep_saucer_core', 'dnn_encoding', and 'xgb_encoding' are:
 
 Copyright (c) 2019 School of Electronics and Computer Science, University of Southampton and Hitachi, Ltd. 
 All rights reserved.

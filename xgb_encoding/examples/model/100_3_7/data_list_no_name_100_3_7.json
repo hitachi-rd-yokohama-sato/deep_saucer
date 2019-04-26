@@ -1,0 +1,58 @@
+{
+  "input": [
+    {
+      "name": "f0",
+      "cont_value_flag": true,
+      "type": "int",
+      "upper": 13540,
+      "lower": 290
+    },
+    {
+      "name": "f1",
+      "cont_value_flag": true,
+      "type": "int",
+      "upper": 33,
+      "lower": 0
+    },
+    {
+      "name": "f2",
+      "cont_value_flag": true,
+      "type": "int",
+      "upper": 1651359,
+      "lower": 520
+    },
+    {
+      "name": "f3",
+      "cont_value_flag": true,
+      "type": "int",
+      "upper": 5,
+      "lower": 1
+    },
+    {
+      "name": "f4",
+      "cont_value_flag": true,
+      "type": "int",
+      "upper": 13,
+      "lower": 1
+    },
+    {
+      "name": "f5",
+      "cont_value_flag": true,
+      "type": "int",
+      "upper": 9410,
+      "lower": 290
+    },
+    {
+      "name": "f6",
+      "cont_value_flag": true,
+      "type": "int",
+      "upper": 4820,
+      "lower": 0
+    }
+  ],
+  "output": [
+    {
+      "name": "y"
+    }
+  ]
+}

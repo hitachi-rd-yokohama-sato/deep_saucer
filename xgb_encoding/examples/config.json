@@ -1,0 +1,9 @@
+{
+  "search_range_ratio": 100,
+  "prop_path": "./property/property_1.txt",
+  "data_list_path": "./model/100_3_7/data_list_no_name_100_3_7.json",
+  "extend_arg": "separate",
+  "splitting": true,
+  "vol_ratio": 10,
+  "permutation_list_max": 10
+}
