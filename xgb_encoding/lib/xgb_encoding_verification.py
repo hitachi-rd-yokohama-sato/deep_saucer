@@ -2,6 +2,7 @@ import sys
 import pickle
 import pandas as pd
 import json
+import importlib.util as iu
 
 from z3 import *
 import copy
@@ -9,6 +10,7 @@ import time
 import datetime
 import math
 
+import xgboost as xgb
 from xgboost.core import *
 from xgboost.core import _check_call
 from xgboost.core import _LIB
@@ -26,7 +28,8 @@ import z3util
 import traceback
 
 _LOG_MSG_INPUT_VALUE = '  input to {0} is {1}'
-_LOG_MSG_OUTPUT_VALUE = '  output from {0} is {1}\n'
+_LOG_MSG_DEBUG_INPUT_VALUE = '  Debug : input to {0} is {1}'
+_LOG_MSG_OUTPUT_VALUE = '  output from {0} is {1}'
 _LOG_MSG_WARN_VARIAVLES = 'Warning: Explanatory variable "{}" ' \
                           'not used in model.'
 _LOG_MSG_WARN_UPPER_LIMIT = 'Warning: Explanatory variable "{}" ' \
@@ -35,6 +38,8 @@ _LOG_MSG_WARN_UPPER_LIMIT = 'Warning: Explanatory variable "{}" ' \
 _LOG_MSG_WARN_LOWER_LIMIT = 'Warning: Explanatory variable "{}" ' \
                             'was not set Lower limit.' \
                             'Search violation may not stop.'
+
+_LOG_MSG_TIME_OUT = 'Time out find_extents_rev'
 
 _SEARCH_RANGE_RATIO = 'search_range_ratio'
 _BUFFER_RANGE_RATIO = 'buffer_range_ratio'
@@ -49,6 +54,11 @@ _SEPARATE = 'separate'
 _SPLITTING = 'splitting'
 _VOL_RATIO = 'vol_ratio'
 _PERMUTATION_LIST_MAX = 'permutation_list_max'
+_MODE = 'mode'
+_REGRESSOR = 'regressor'
+_CLASSIFIER = 'classifier'
+_CONV_PATH = 'conv_file_path'
+_CONV_NAME = 'conv_func_name'
 
 
 _INPUT = 'input'
@@ -64,6 +74,11 @@ _Z3 = 'z3'
 _XGBOOST = 'xgboost'
 _DIRECTION = 'direction'
 
+_CONVERSION = 'conversion'
+_CONVERTED = 'converted'
+_INPUT_CONVERTED = _INPUT + '_' + _CONVERTED
+_OUTPUT_CONVERTED = _OUTPUT + '_' + _CONVERTED
+
 num_call_solver = [0, 0.0]
 
 
@@ -76,92 +91,23 @@ def check_solver(solver):
     return result
 
 
-def get_dump(booster, fmap='', with_stats=False, dump_format="json"):
-    """
-    Returns the dump the model as a list of strings.
-    """
+def dec_exp_vars_rev(input_type, **kwargs):
 
-    length = c_bst_ulong()
-    sarr = ctypes.POINTER(ctypes.c_char_p)()
-    if booster.feature_names is not None and fmap == '':
-        flen = len(booster.feature_names)
-
-        fname = from_pystr_to_cstr(booster.feature_names)
-
-        if booster.feature_types is None:
-            # use quantitative as default
-            # {'q': quantitative, 'i': indicator}
-            ftype = from_pystr_to_cstr(['q'] * flen)
-        else:
-            ftype = from_pystr_to_cstr(booster.feature_types)
-        _check_call(_LIB.XGBoosterDumpModelExWithFeatures(
-            booster.handle,
-            ctypes.c_int(flen),
-            fname,
-            ftype,
-            ctypes.c_int(with_stats),
-            c_str(dump_format),
-            ctypes.byref(length),
-            ctypes.byref(sarr)))
-    else:
-        if fmap != '' and not os.path.exists(fmap):
-            raise ValueError("No such file: {0}".format(fmap))
-        _check_call(_LIB.XGBoosterDumpModelEx(booster.handle,
-                                              c_str(fmap),
-                                              ctypes.c_int(with_stats),
-                                              c_str(dump_format),
-                                              ctypes.byref(length),
-                                              ctypes.byref(sarr)))
-    res = from_cstr_to_pystr(sarr, length)
-    return res
-
-
-def dump_model(booster, fout, fmap='', with_stats=False, dump_format="json"):
-    """
-    Dump model into a text file.
-
-    Parameters
-    ----------
-    booster :
-    fout : string
-        Output file name.
-    fmap : string, optional
-        Name of the file containing feature map names.
-    with_stats : bool (optional)
-        Controls whether the split statistics are output.
-    dump_format : string, optional
-            Format of model dump file. Can be 'text' or 'json'.
-    """
-    if isinstance(fout, STRING_TYPES):
-        fout = open(fout, 'w')
-        need_close = True
-    else:
-        need_close = False
-    ret = get_dump(booster, fmap, with_stats, dump_format=dump_format)
-    if dump_format == 'json':
-        fout.write('[\n')
-        for i in range(len(ret)):
-            fout.write(ret[i])
-            if i < len(ret) - 1:
-                fout.write(",\n")
-        fout.write('\n]')
-    else:
-        for i in range(len(ret)):
-            fout.write('booster[{}]:\n'.format(i))
-            fout.write(ret[i])
-    if need_close:
-        fout.close()
-
-
-def dec_exp_vars_rev(input_type):
+    conversion = kwargs.get(_CONVERSION, False)
 
     input_array = []
     for i in range(len(input_type)):
 
         if 'int' in str(input_type[i]):
-            input_array.append(Int(_INPUT + str(i)))
+            if not conversion:
+                input_array.append(Int(_INPUT + str(i)))
+            else:
+                input_array.append(Int(_INPUT_CONVERTED + str(i)))
         elif 'float' in str(input_type[i]):
-            input_array.append(Real(_INPUT + str(i)))
+            if not conversion:
+                input_array.append(Real(_INPUT + str(i)))
+            else:
+                input_array.append(Real(_INPUT_CONVERTED + str(i)))
         else:
             assert False
 
@@ -180,7 +126,8 @@ def input_name_replacer(tree, input_name):
                 break
 
         if success is False:
-            print('Error ' + name_var + ' could not be repleced')
+            print('Error ' + name_var + ' could not be repleced',
+                  file=sys.stderr)
             assert False
 
     if 'children' in tree:
@@ -204,7 +151,8 @@ def add_constraints(input_array, input_type, out_var, tree, antecedent,
         if var_index < len(input_used_or_not):
             input_used_or_not[var_index] = True
         else:
-            print('Error: the length of input_used_or_not is invalid')
+            print('Error: the length of input_used_or_not is invalid',
+                  file=sys.stderr)
             assert False
 
         var = input_array[var_index]
@@ -245,17 +193,21 @@ def add_constraints(input_array, input_type, out_var, tree, antecedent,
 
     else:
         print("Unexpected Error: A decision tree comprising "
-              "the XGBoost model has an unexpected attribute")
-        assert False  # TODO Error handling
+              "the XGBoost model has an unexpected attribute", file=sys.stderr)
+        assert False
 
 
 def add_trees_consts_to_solver(djson, input_array, input_type, solver,
-                               input_used_or_not):
+                               input_used_or_not, **kwargs):
 
+    conversion = kwargs.get(_CONVERSION, False)
     sub_c_array = []
     for tree_id, tree in enumerate(djson):
 
-        out_var = Real('c{0}'.format(tree_id))
+        if not conversion:
+            out_var = Real('c{0}'.format(tree_id))
+        else:
+            out_var = Real('c_{0}{1}'.format(_CONVERSION, tree_id))
 
         sub_c_array.append(out_var)
         antecedent = []
@@ -264,8 +216,12 @@ def add_trees_consts_to_solver(djson, input_array, input_type, solver,
     return sub_c_array
 
 
-def add_trees_relation_regressor(sub_c_array, solver):
-    c_sum = Real('c_sum')
+def add_trees_relation_regressor(sub_c_array, solver, **kwargs):
+    conversion = kwargs.get(_CONVERSION, False)
+    if not conversion:
+        c_sum = Real('c_sum')
+    else:
+        c_sum = Real('c_sum_' + _CONVERTED)
     added = sub_c_array[0]
     for index in range(1, len(sub_c_array)):
         added = added + sub_c_array[index]
@@ -274,6 +230,19 @@ def add_trees_relation_regressor(sub_c_array, solver):
     solver.add(rel_formula)
 
     return c_sum
+
+
+def add_trees_relation_classifier(out_array, sub_c_array, category, base_score, solver):
+    for index, out_var in enumerate(out_array):
+        added = sub_c_array[index]
+        while index + category < len(sub_c_array):
+            index = index + category
+            added = added + sub_c_array[index]
+
+        added = added + base_score
+
+        rel_formula = (out_var == added)
+        solver.add(rel_formula)
 
 
 # def create_upperlower_from_input(input):
@@ -297,7 +266,7 @@ def add_trees_relation_regressor(sub_c_array, solver):
 def add_upperlower_constraints(input_array, solver, upper_limit, lower_limit):
     print_solver = Solver()
     for f_index in range(len(input_array)):
-        # 上限の追加
+
         upper = upper_limit[f_index]
         if upper is not None:
             upper_constraint = input_array[f_index] <= upper
@@ -307,7 +276,6 @@ def add_upperlower_constraints(input_array, solver, upper_limit, lower_limit):
             pass
 
         lower = lower_limit[f_index]
-
         if lower is not None:
             lower_constraint = input_array[f_index] >= lower
             solver.add(lower_constraint)
@@ -334,6 +302,7 @@ def add_other_constraints(input_array, output_array, in_names, out_names,
 
 
 def add_property(input_array, output_array,
+                 input_array_converted, output_array_converted,
                  in_names, out_names, solver, constraint_file):
 
     prop_str = z3util.parse_constraint(constraint_file, in_names, out_names)
@@ -348,53 +317,43 @@ def add_property(input_array, output_array,
     del print_solver
 
 
+def _cast_values(value_list, type_list):
+    cast_value_list = []
+    for _value, _type in zip(value_list, type_list):
+        if _value is not None:
+            try:
+                if 'int' in str(_type):
+                    cast_value_list.append(int(_value))
+
+                elif 'float' in str(_type):
+                    cast_value_list.append(Fraction(_value))
+
+                else:
+                    print("Unexpected input_type is designated", file=sys.stderr)
+                    assert False
+            except:
+                raise ValueError
+        else:
+            cast_value_list.append(None)
+
+    return cast_value_list
+
+
 def cast_upperlower(lower_limit, upper_limit, input_type):
-    upper_limit_list = []
-    lower_limit_list = []
-    for f_index in range(len(input_type)):
 
-        if upper_limit[f_index] is not None:
-            if 'int' in str(input_type[f_index]):
-                try:
-                    upper = int(upper_limit[f_index])
-                except:
-                    print("Unexpected value is given as upper_bound")
-                    assert False
-            elif 'float' in str(input_type[f_index]):
-                try:
-                    upper = float(upper_limit[f_index])
-                except:
-                    print("Unexpected value is given as upper_bound")
-                    assert False
-            else:
-                print("Unexpected input_type is designated")
-                assert False
+    try:
+        upper_limit_list = _cast_values(upper_limit, input_type)
 
-            upper_limit_list.append(upper)
+    except ValueError:
+        print("Unexpected value is given as upper_bound", file=sys.stderr)
+        assert False
 
-        else:
-            upper_limit_list.append(None)
+    try:
+        lower_limit_list = _cast_values(lower_limit, input_type)
 
-        if lower_limit[f_index] is not None:
-            if 'int' in str(input_type[f_index]):
-                try:
-                    lower = int(lower_limit[f_index])
-                except:
-                    print("Unexpected value is given as lower_bound")
-                    assert False
-            elif 'float' in str(input_type[f_index]):
-                try:
-                    lower = float(lower_limit[f_index])
-                except:
-                    print("Unexpected value is given as lower_bound")
-                    assert False
-            else:
-                print("Unexpected input_type is designated")
-                assert False
-
-            lower_limit_list.append(lower)
-        else:
-            lower_limit_list.append(None)
+    except ValueError:
+        print("Unexpected value is given as lower_bound", file=sys.stderr)
+        assert False
 
     return lower_limit_list, upper_limit_list
 
@@ -433,35 +392,31 @@ def calc_diff(lower_limit, upper_limit, input_type, search_range_ratio):
             diff = 0.1
 
     else:
-        print("Error: input_type is not defined")
+        print("Error: input_type is not defined", file=sys.stderr)
         assert False
 
     return diff
 
 
+def _check_timeout(conf_time_out, start_time):
+    if conf_time_out is not None:
+        if time.time() > start_time + conf_time_out:
+            return True
+
+    return False
+
+
 def find_extents_rev(solver, model, lower_limit, upper_limit,
-                     input_array, output_array, input_type,
-                     model_array, cont_value_flag, search_range_ratio,
-                     input_name, input_used_or_not,
-                     start_time, system_time_out, search_time_out, extend_arg):
+                     input_array, output_array,
+                     input_array_converted, output_array_converted,
+                     input_type, cont_value_flag,
+                     input_name, input_used_or_not, start_time, conf):
 
     find_start = time.time()
 
-    base_volume = calc_volume(lower_limit, upper_limit)
-    input_array_solution = [None] * len(input_array)
+    # base_volume = calc_volume(lower_limit, upper_limit, input_used_or_not)
     m = solver.model()
-    for index in range(len(input_array)):
-        z3obj = m[input_array[index]]
-        if z3obj is not None:
-            if 'int' in str(input_type[index]):
-                num = int(z3obj.as_long())
-            elif 'float' in str(input_type[index]):
-                num = float(z3obj.as_fraction())
-            else:
-                print("Error: input_type is not defined")
-                assert False
-
-            input_array_solution[index] = num
+    input_array_solution = get_z3_solution(m, input_array, input_type)
 
     upper_extent = [0] * len(input_array)
     lower_extent = [0] * len(input_array)
@@ -480,9 +435,8 @@ def find_extents_rev(solver, model, lower_limit, upper_limit,
     solver.push()
 
     diff_list = []
-    for index in range(len(input_array)):
-        diff = calc_diff(lower_limit[index], upper_limit[index],
-                         input_type[index], search_range_ratio)
+    for lower, upper, _type in zip(lower_limit, upper_limit, input_type):
+        diff = calc_diff(lower, upper, _type, conf.search_range_ratio)
         diff_list.append(diff)
 
     flag = True
@@ -490,342 +444,402 @@ def find_extents_rev(solver, model, lower_limit, upper_limit,
     while flag is True:
         flag = False
 
-        if extend_arg == _SAMETIME:
-            solver.push()
+        if conf.extend_arg == _SAMETIME:
+            search_count, flag = _find_extents_rev_sametime(
+                flag, lower_extent, upper_extent, diff_list,
+                input_array_solution, search_count,
+                solver, model, lower_limit, upper_limit,
+                input_array, output_array,
+                input_array_converted, output_array_converted,
+                input_type, cont_value_flag,
+                input_name, input_used_or_not, conf)
 
-            new_upper = copy.deepcopy(upper_extent)
-            new_lower = copy.deepcopy(lower_extent)
-            for index in range(len(input_array)):
-                if (cont_value_flag[index]) and (
-                        input_array_solution[index] is not None) and (
-                        input_used_or_not[
-                            index] is True):
+            # Check Time out
+            if _check_timeout(conf.system_time_out, start_time):
+                solver.pop()
 
-                    if (((upper_limit[index] is not None) and (
-                            upper_extent[index] == upper_limit[index])) or (
-                            diff_list[index] == 0)) and \
-                            (((lower_limit[index] is not None) and (
-                            lower_extent[index] == lower_limit[index])) or (
-                            diff_list[index] == 0)):
-                        pass
+                _log_writer(_LOG_MSG_TIME_OUT, [log_file, sys.stdout])
 
-                    else:
-                        if upper_limit[index] is not None:
-                            if upper_extent[index] + diff_list[index] >= upper_limit[index]:
-                                new_upper_index = upper_limit[index]
-                            else:
-                                new_upper_index = upper_extent[index] + diff_list[index]
-                        else:
-                            new_upper_index = upper_extent[index] + diff_list[index]
+                return (lower_extent, upper_extent,
+                        no_solution_spaces_fixed, True, diff_list)
 
-                        new_upper[index] = new_upper_index
+            if _check_timeout(conf.search_time_out, find_start):
+                solver.pop()
 
-                        if lower_limit[index] is not None:
-                            if lower_extent[index] - diff_list[index] <= lower_limit[index]:
-                                new_lower_index = lower_limit[index]
-                            else:
-                                new_lower_index = lower_extent[index] - diff_list[index]
-                        else:
-                            new_lower_index = lower_extent[index] - diff_list[index]
+                _log_writer(_LOG_MSG_TIME_OUT, [log_file, sys.stdout])
 
-                        new_lower[index] = new_lower_index
+                return (lower_extent, upper_extent,
+                        no_solution_spaces_fixed, False, diff_list)
 
-            for index in range(len(input_array)):
-                upper_extent_constraint = input_array[index] <= new_upper[index]
-
-                lower_extent_constraint = new_lower[index] <= input_array[index]
-
-                solver.add(upper_extent_constraint,
-                           lower_extent_constraint)
-
-            within_current_constraint_upper_list = []
-            within_current_constraint_lower_list = []
-            for index in range(len(input_array)):
-                within_current_constraint_upper_list.append(
-                    input_array[index] <= upper_extent[index])
-                within_current_constraint_lower_list.append(
-                    lower_extent[index] <= input_array[index])
-
-            constraint_upper = And(within_current_constraint_upper_list)
-            constraint_lower = And(within_current_constraint_lower_list)
-            constraint_ul = And(constraint_upper, constraint_lower)
-
-            solver.add(Not(constraint_ul))
-
-            result = check_solver(solver)
-
-            if result == sat:
-
-                search_count = search_count + 1
-
-                _log_writer('#{0} {1} extended:'.format(
-                    search_count, _SAMETIME),
-                    [log_file, sys.stdout]
-                )
-                print_violation(
-                    input_array, output_array, input_type,
-                    model_array, model, solver, input_name)
-
-                for index in range(len(input_array)):
-                    upper_extent[index] = new_upper[index]
-                    lower_extent[index] = new_lower[index]
-                flag = True
-
-            elif result == unknown:
-                pass
-            else:
-                pass
-
-            extend_volume = calc_volume(lower_extent, upper_extent)
-
-            if system_time_out is not None:
-                if time.time() > start_time + system_time_out:
-                    # _log_writer('Volume: {0} / {1} = {2:%}'.format(
-                    #     extend_volume, base_volume,
-                    #     extend_volume / base_volume),
-                    #     [sys.stdout, log_file])
-                    solver.pop()
-                    _log_writer('Time out find_extents_rev',
-                                [log_file, sys.stdout])
-                    return (lower_extent, upper_extent,
-                            no_solution_spaces_fixed, True, diff_list)
-
-            if search_time_out is not None:
-                if time.time() > find_start + search_time_out:
-                    # _log_writer('Volume: {0} / {1} = {2:%}'.format(
-                    #     extend_volume, base_volume,
-                    #     extend_volume / base_volume),
-                    #     [sys.stdout, log_file])
-                    solver.pop()
-                    _log_writer('Time out find_extents_rev',
-                                [log_file, sys.stdout])
-
-                    return (lower_extent, upper_extent,
-                            no_solution_spaces_fixed, False, diff_list)
-
-            solver.pop()
-
-        elif extend_arg == _SEPARATE:
+        elif conf.extend_arg == _SEPARATE:
             for index in range(len(input_array)):
                 solver.push()
 
                 if (cont_value_flag[index]) and (
                         input_array_solution[index] is not None) and (
-                        input_used_or_not[
-                            index] is True):
+                            input_used_or_not[index] is True):
 
                     diff = diff_list[index]
 
-                    for j in range(len(input_array)):
-                        if (j != index) and (input_array_solution[j] is not None):
-                            solver.add(input_array[j] <= upper_extent[j])
-                            solver.add(lower_extent[j] <= input_array[j])
+                    for _index in range(len(input_array)):
+                        if (_index != index) and (
+                                input_array_solution[_index] is not None):
+                            solver.add(
+                                input_array[_index] <= upper_extent[_index])
+                            solver.add(
+                                lower_extent[_index] <= input_array[_index])
 
-                    solver.push()
+                    search_count, flag = _find_extents_rev_upper(
+                        index, flag, lower_extent, upper_extent, diff,
+                        input_array_solution, search_count,
+                        no_solution_space_tmp, no_solution_spaces_fixed,
+                        solver, model, upper_limit,
+                        input_array, output_array,
+                        input_array_converted, output_array_converted,
+                        input_type, input_name, conf)
 
-                    pre_upper_extend = upper_extent[index]
-                    if ((upper_limit[index] is not None) and (
-                            upper_extent[index] == upper_limit[index])) or (
-                            diff == 0):
-                        pass
-
-                    else:
-                        if upper_limit[index] is not None:
-                            if upper_extent[index] + diff >= upper_limit[index]:
-                                new_upper_index = upper_limit[index]
-                            else:
-                                new_upper_index = upper_extent[index] + diff
-                        else:
-                            new_upper_index = upper_extent[index] + diff
-
-                        upper_extent_constraint1 = input_array[index] <= new_upper_index
-
-                        upper_extent_constraint2 = upper_extent[index] < input_array[index]
-
-                        solver.add(upper_extent_constraint1,
-                                   upper_extent_constraint2)
-
-                        result = check_solver(solver)
-
-                        if result == sat:
-                            search_count = search_count + 1
-                            _log_writer('#{0} {1} extended: {2}'.format(
-                                search_count, _UPPER, input_name[index]),
-                                [log_file, sys.stdout]
-                            )
-                            print_violation(
-                                input_array, output_array, input_type,
-                                model_array, model, solver, input_name)
-
-                            upper_extent[index] = new_upper_index
-                            flag = True
-
-                            d_key = str(index) + 'u'
-                            if d_key in no_solution_space_tmp:
-                                info = (index, 'u', no_solution_space_tmp.pop(
-                                    d_key))
-                                no_solution_spaces_fixed.append(info)
-                            else:
-                                pass
-
-                        elif result == unsat:
-                            d_key = str(index) + 'u'
-                            no_sol_lower = []
-                            no_sol_lower_eqsign = []
-                            no_sol_upper = []
-                            no_sol_upper_eqsign = []
-                            for j in range(len(input_array)):
-                                if input_array_solution[j] is not None:
-                                    if j != index:
-                                        no_sol_lower.append(lower_extent[j])
-                                        no_sol_lower_eqsign.append('with_equal')
-                                        no_sol_upper.append(upper_extent[j])
-                                        no_sol_upper_eqsign.append('with_equal')
-                                    else:
-                                        no_sol_lower.append(upper_extent[index])
-                                        no_sol_lower_eqsign.append(
-                                            'without_equal')
-                                        no_sol_upper.append(
-                                            upper_extent[index] + diff)
-                                        no_sol_upper_eqsign.append('with_equal')
-                                else:
-                                    no_sol_lower.append(None)
-                                    no_sol_lower_eqsign.append(None)
-                                    no_sol_upper.append(None)
-                                    no_sol_upper_eqsign.append(None)
-
-                            no_sol_tuple = (
-                                tuple(no_sol_lower), tuple(no_sol_lower_eqsign),
-                                tuple(no_sol_upper), tuple(no_sol_upper_eqsign))
-                            no_solution_space_tmp[d_key] = no_sol_tuple
-
-                    solver.pop()
-                    solver.push()
-
-                    pre_lower_extent = lower_extent[index]
-                    if ((lower_limit[index] is not None) and (
-                            lower_extent[index] == lower_limit[index])) or (
-                            diff == 0):
-                        pass
-
-                    else:
-                        if lower_limit[index] is not None:
-                            if lower_extent[index] - diff <= lower_limit[index]:
-                                new_lower_index = lower_limit[index]
-                            else:
-                                new_lower_index = lower_extent[index] - diff
-                        else:
-                            new_lower_index = lower_extent[index] - diff
-
-                        lower_extent_constraint1 = new_lower_index <= input_array[index]
-
-                        lower_extent_constraint2 = input_array[index] < lower_extent[index]
-
-                        solver.add(lower_extent_constraint1,
-                                   lower_extent_constraint2)
-
-                        result = check_solver(solver)
-
-                        if result == sat:
-                            search_count = search_count + 1
-
-                            _log_writer('#{0} {1} extended: {2}'.format(
-                                search_count, _LOWER, input_name[index]),
-                                [log_file, sys.stdout]
-                            )
-                            print_violation(
-                                input_array, output_array, input_type,
-                                model_array, model, solver, input_name)
-
-                            lower_extent[index] = new_lower_index
-                            flag = True
-
-                            d_key = str(index) + 'l'
-                            if d_key in no_solution_space_tmp:
-                                info = (index, 'l', no_solution_space_tmp.pop(
-                                    d_key))
-                                no_solution_spaces_fixed.append(info)
-                            else:
-                                pass
-
-                        elif result == unsat:
-                            d_key = str(index) + 'l'
-                            no_sol_lower = []
-                            no_sol_lower_eqsign = []
-                            no_sol_upper = []
-                            no_sol_upper_eqsign = []
-                            for j in range(len(input_array)):
-                                if input_array_solution[j] is not None:
-                                    if j != index:
-                                        no_sol_lower.append(lower_extent[j])
-                                        no_sol_lower_eqsign.append('with_equal')
-                                        no_sol_upper.append(upper_extent[j])
-                                        no_sol_upper_eqsign.append('with_equal')
-                                    else:
-                                        no_sol_lower.append(
-                                            lower_extent[index] - diff)
-                                        no_sol_lower_eqsign.append('with_equal')
-                                        no_sol_upper.append(lower_extent[index])
-                                        no_sol_upper_eqsign.append(
-                                            'without_equal')
-                                else:
-                                    no_sol_lower.append(None)
-                                    no_sol_lower_eqsign.append(None)
-                                    no_sol_upper.append(None)
-                                    no_sol_upper_eqsign.append(None)
-
-                            no_sol_tuple = (
-                                tuple(no_sol_lower), tuple(no_sol_lower_eqsign),
-                                tuple(no_sol_upper), tuple(no_sol_upper_eqsign))
-                            no_solution_space_tmp[d_key] = no_sol_tuple
-
-                    solver.pop()
+                    search_count, flag = _find_extents_rev_lower(
+                        index, flag, lower_extent, upper_extent, diff,
+                        input_array_solution, search_count,
+                        no_solution_space_tmp, no_solution_spaces_fixed,
+                        solver, model, lower_limit,
+                        input_array, output_array,
+                        input_array_converted, output_array_converted,
+                        input_type, input_name, conf)
 
                 solver.pop()
 
-                extend_volume = calc_volume(lower_extent, upper_extent)
+                # Check Time out
+                if _check_timeout(conf.system_time_out, start_time):
+                    solver.pop()
 
-                if system_time_out is not None:
-                    if time.time() > start_time + system_time_out:
-                        # _log_writer('Volume: {0} / {1} = {2:%}'.format(
-                        #     extend_volume, base_volume,
-                        #     extend_volume / base_volume),
-                        #     [sys.stdout, log_file])
-                        solver.pop()
-                        _log_writer('Time out find_extents_rev',
-                                    [log_file, sys.stdout])
-                        return (lower_extent, upper_extent,
-                                no_solution_spaces_fixed, True, diff_list)
+                    _log_writer(_LOG_MSG_TIME_OUT, [log_file, sys.stdout])
 
-                if search_time_out is not None:
-                    if time.time() > find_start + search_time_out:
-                        # _log_writer('Volume: {0} / {1} = {2:%}'.format(
-                        #     extend_volume, base_volume,
-                        #     extend_volume / base_volume),
-                        #     [sys.stdout, log_file])
-                        solver.pop()
-                        _log_writer('Time out find_extents_rev',
-                                    [log_file, sys.stdout])
+                    return (lower_extent, upper_extent,
+                            no_solution_spaces_fixed, True, diff_list)
 
-                        return (lower_extent, upper_extent,
-                                no_solution_spaces_fixed, False, diff_list)
+                if _check_timeout(conf.search_time_out, find_start):
+                    solver.pop()
+
+                    _log_writer(_LOG_MSG_TIME_OUT, [log_file, sys.stdout])
+
+                    return (lower_extent, upper_extent,
+                            no_solution_spaces_fixed, False, diff_list)
 
     solver.pop()
-
-    # _log_writer('Volume: {0} / {1} = {2:%}'.format(
-    #     extend_volume, base_volume, extend_volume / base_volume),
-    #     [sys.stdout, log_file])
 
     return (
         lower_extent, upper_extent, no_solution_spaces_fixed, False, diff_list)
 
 
-def check_splitting(space_tobe_split, lower_limit, upper_limit, vol_ratio):
+def _find_extents_rev_sametime(flag, lower_extent, upper_extent, diff_list,
+                               input_array_solution, search_count,
+                               solver, model, lower_limit, upper_limit,
+                               input_array, output_array,
+                               input_array_converted, output_array_converted,
+                               input_type, cont_value_flag,
+                               input_name, input_used_or_not, conf):
+    solver.push()
+
+    new_upper = copy.deepcopy(upper_extent)
+    new_lower = copy.deepcopy(lower_extent)
+    for index in range(len(input_array)):
+        if (cont_value_flag[index]) and (
+                input_array_solution[index] is not None) and (
+                    input_used_or_not[index] is True):
+
+            diff = diff_list[index]
+
+            if (((upper_limit[index] is not None) and
+                 (upper_extent[index] == upper_limit[index])) or (diff == 0)) and (
+                    ((lower_limit[index] is not None) and
+                     (lower_extent[index] == lower_limit[index])) or (diff == 0)):
+                pass
+
+            else:
+                if upper_limit[index] is not None:
+                    if upper_extent[index] + diff >= upper_limit[index]:
+                        new_upper_extent = upper_limit[index]
+                    else:
+                        new_upper_extent = upper_extent[index] + diff
+                else:
+                    new_upper_extent = upper_extent[index] + diff
+
+                new_upper[index] = new_upper_extent
+
+                if lower_limit[index] is not None:
+                    if lower_extent[index] - diff <= lower_limit[index]:
+                        new_lower_extent = lower_limit[index]
+                    else:
+                        new_lower_extent = lower_extent[index] - diff
+                else:
+                    new_lower_extent = lower_extent[index] - diff
+
+                new_lower[index] = new_lower_extent
+
+    for index in range(len(input_array)):
+        upper_extent_constraint = input_array[index] <= new_upper[index]
+
+        lower_extent_constraint = new_lower[index] <= input_array[index]
+
+        solver.add(upper_extent_constraint, lower_extent_constraint)
+
+    within_current_constraint_upper_list = []
+    within_current_constraint_lower_list = []
+    for index in range(len(input_array)):
+        within_current_constraint_upper_list.append(
+            input_array[index] <= upper_extent[index])
+        within_current_constraint_lower_list.append(
+            lower_extent[index] <= input_array[index])
+
+    constraint_upper = And(within_current_constraint_upper_list)
+    constraint_lower = And(within_current_constraint_lower_list)
+    constraint_ul = And(constraint_upper, constraint_lower)
+
+    solver.add(Not(constraint_ul))
+
+    result = check_solver(solver)
+
+    if result == sat:
+
+        search_count = search_count + 1
+
+        _log_writer('#{0} {1} extended:'.format(
+            search_count, _SAMETIME),
+            [log_file, sys.stdout]
+        )
+        print_extent(new_lower, new_upper, input_name, input_used_or_not)
+
+        print_violation(
+            input_array, output_array,
+            input_array_converted, output_array_converted, input_type,
+            model, solver, input_name, conf)
+
+        for index in range(len(input_array)):
+            upper_extent[index] = new_upper[index]
+            lower_extent[index] = new_lower[index]
+
+        flag = True
+
+    elif result == unknown:
+        pass
+    else:
+        pass
+
+    solver.pop()
+
+    return search_count, flag
+
+
+def _find_extents_rev_upper(index, flag, lower_extent, upper_extent, diff,
+                            input_array_solution, search_count,
+                            no_solution_space_tmp, no_solution_spaces_fixed,
+                            solver, model, upper_limit,
+                            input_array, output_array,
+                            input_array_converted, output_array_converted,
+                            input_type, input_name, conf):
+    solver.push()
+
+    pre_upper_extend = upper_extent[index]
+    if ((upper_limit[index] is not None) and (
+            upper_extent[index] == upper_limit[index])) or (diff == 0):
+        pass
+
+    else:
+        if upper_limit[index] is not None:
+            if upper_extent[index] + diff >= upper_limit[index]:
+                new_upper_extent = upper_limit[index]
+            else:
+                new_upper_extent = upper_extent[index] + diff
+        else:
+            new_upper_extent = upper_extent[index] + diff
+
+        upper_extent_constraint1 = input_array[index] <= new_upper_extent
+
+        upper_extent_constraint2 = upper_extent[index] < input_array[index]
+
+        solver.add(upper_extent_constraint1, upper_extent_constraint2)
+
+        result = check_solver(solver)
+
+        if result == sat:
+            search_count = search_count + 1
+
+            if 'int' in str(input_type[index]):
+                _log_writer(
+                    '#{0} {1} extended : {2} : {3} -> {4}'.format(
+                        search_count, _UPPER,
+                        input_name[index], upper_extent[index],
+                        new_upper_extent),
+                    [log_file, sys.stdout])
+
+            elif 'float' in str(input_type[index]):
+                _log_writer(
+                    '#{0} {1} extended : {2} : {3} -> {4}'.format(
+                        search_count, _UPPER,
+                        input_name[index],
+                        float(upper_extent[index]),
+                        float(new_upper_extent)),
+                    [log_file, sys.stdout])
+
+            print_violation(
+                input_array, output_array,
+                input_array_converted, output_array_converted,
+                input_type, model, solver, input_name, conf)
+
+            upper_extent[index] = new_upper_extent
+            flag = True
+
+            d_key = str(index) + 'u'
+            if d_key in no_solution_space_tmp:
+                info = (index, 'u', no_solution_space_tmp.pop(d_key))
+                no_solution_spaces_fixed.append(info)
+            else:
+                pass
+
+        elif result == unsat:
+            d_key = str(index) + 'u'
+            no_sol_lower = []
+            no_sol_lower_eqsign = []
+            no_sol_upper = []
+            no_sol_upper_eqsign = []
+            for _index in range(len(input_array)):
+                if input_array_solution[_index] is not None:
+                    if _index != index:
+                        no_sol_lower.append(lower_extent[_index])
+                        no_sol_lower_eqsign.append('with_equal')
+                        no_sol_upper.append(upper_extent[_index])
+                        no_sol_upper_eqsign.append('with_equal')
+                    else:
+                        no_sol_lower.append(upper_extent[index])
+                        no_sol_lower_eqsign.append('without_equal')
+                        no_sol_upper.append(upper_extent[index] + diff)
+                        no_sol_upper_eqsign.append('with_equal')
+                else:
+                    no_sol_lower.append(None)
+                    no_sol_lower_eqsign.append(None)
+                    no_sol_upper.append(None)
+                    no_sol_upper_eqsign.append(None)
+
+            no_sol_tuple = (
+                tuple(no_sol_lower), tuple(no_sol_lower_eqsign),
+                tuple(no_sol_upper), tuple(no_sol_upper_eqsign))
+            no_solution_space_tmp[d_key] = no_sol_tuple
+
+    solver.pop()
+
+    return search_count, flag
+
+
+def _find_extents_rev_lower(index, flag, lower_extent, upper_extent, diff,
+                            input_array_solution, search_count,
+                            no_solution_space_tmp, no_solution_spaces_fixed,
+                            solver, model, lower_limit,
+                            input_array, output_array,
+                            input_array_converted, output_array_converted,
+                            input_type, input_name, conf):
+
+    solver.push()
+
+    pre_lower_extent = lower_extent[index]
+    if ((lower_limit[index] is not None) and (
+            lower_extent[index] == lower_limit[index])) or (diff == 0):
+        pass
+
+    else:
+        if lower_limit[index] is not None:
+            if lower_extent[index] - diff <= lower_limit[index]:
+                new_lower_extent = lower_limit[index]
+            else:
+                new_lower_extent = lower_extent[index] - diff
+        else:
+            new_lower_extent = lower_extent[index] - diff
+
+        lower_extent_constraint1 = new_lower_extent <= input_array[index]
+
+        lower_extent_constraint2 = input_array[index] < lower_extent[index]
+
+        solver.add(lower_extent_constraint1, lower_extent_constraint2)
+
+        result = check_solver(solver)
+
+        if result == sat:
+            search_count = search_count + 1
+
+            if 'int' in str(input_type[index]):
+                _log_writer(
+                    '#{0} {1} extended: {2} : {3} -> {4}'.format(
+                        search_count, _LOWER,
+                        input_name[index], lower_extent[index],
+                        new_lower_extent),
+                    [log_file, sys.stdout])
+
+            elif 'float' in str(input_type[index]):
+                _log_writer(
+                    '#{0} {1} extended: {2} : {3} -> {4}'.format(
+                        search_count, _LOWER,
+                        input_name[index],
+                        float(lower_extent[index]),
+                        float(new_lower_extent)),
+                    [log_file, sys.stdout])
+
+            print_violation(
+                input_array, output_array,
+                input_array_converted, output_array_converted,
+                input_type, model, solver, input_name, conf)
+
+            lower_extent[index] = new_lower_extent
+            flag = True
+
+            d_key = str(index) + 'l'
+            if d_key in no_solution_space_tmp:
+                info = (index, 'l', no_solution_space_tmp.pop(d_key))
+                no_solution_spaces_fixed.append(info)
+            else:
+                pass
+
+        elif result == unsat:
+            d_key = str(index) + 'l'
+            no_sol_lower = []
+            no_sol_lower_eqsign = []
+            no_sol_upper = []
+            no_sol_upper_eqsign = []
+            for _index in range(len(input_array)):
+                if input_array_solution[_index] is not None:
+                    if _index != index:
+                        no_sol_lower.append(lower_extent[_index])
+                        no_sol_lower_eqsign.append('with_equal')
+                        no_sol_upper.append(upper_extent[_index])
+                        no_sol_upper_eqsign.append('with_equal')
+                    else:
+                        no_sol_lower.append(lower_extent[index] - diff)
+                        no_sol_lower_eqsign.append('with_equal')
+                        no_sol_upper.append(lower_extent[index])
+                        no_sol_upper_eqsign.append(
+                            'without_equal')
+                else:
+                    no_sol_lower.append(None)
+                    no_sol_lower_eqsign.append(None)
+                    no_sol_upper.append(None)
+                    no_sol_upper_eqsign.append(None)
+
+            no_sol_tuple = (
+                tuple(no_sol_lower), tuple(no_sol_lower_eqsign),
+                tuple(no_sol_upper), tuple(no_sol_upper_eqsign))
+            no_solution_space_tmp[d_key] = no_sol_tuple
+
+    solver.pop()
+
+    return search_count, flag
+
+
+def check_splitting(space_tobe_split, lower_limit, upper_limit, vol_ratio, input_used_or_not):
     space_tobe_split_lower = space_tobe_split[0]
     space_tobe_split_upper = space_tobe_split[2]
 
-    whole_vol = calc_volume(lower_limit, upper_limit)
-    violation_vol = calc_volume(space_tobe_split_lower, space_tobe_split_upper)
+    whole_vol = calc_volume(lower_limit, upper_limit, input_used_or_not)
+    violation_vol = calc_volume(
+        space_tobe_split_lower, space_tobe_split_upper, input_used_or_not)
 
     if (whole_vol * (vol_ratio / 100)) <= violation_vol:
         return True
@@ -882,7 +896,8 @@ def check_no_sol_space(space_tobe_split, no_solution_space):
     return True
 
 
-def evaluate_splitting(split_spaces, split_space_inside, solver, input_array):
+def evaluate_splitting(split_spaces, split_space_inside, solver,
+                       input_array, input_used_or_not):
 
     split_spaces_list = split_spaces + [split_space_inside]
     satisfiability_list = []
@@ -906,7 +921,8 @@ def evaluate_splitting(split_spaces, split_space_inside, solver, input_array):
                 elif upper_eqsign[f_index] == 'without_equal':
                     upper_constraint = input_array[f_index] < upper
                 else:
-                    print('Error: an unexpected eqsign identifier is used')
+                    print('Error: an unexpected eqsign identifier is used',
+                          file=sys.stderr)
                     assert False
 
                 solver.add(upper_constraint)
@@ -917,7 +933,8 @@ def evaluate_splitting(split_spaces, split_space_inside, solver, input_array):
                 elif lower_eqsign[f_index] == 'without_equal':
                     lower_constraint = input_array[f_index] > lower
                 else:
-                    print('Error: an unexpected eqsign identifier is used')
+                    print('Error: an unexpected eqsign identifier is used',
+                          file=sys.stderr)
                     assert False
 
                 solver.add(lower_constraint)
@@ -928,7 +945,7 @@ def evaluate_splitting(split_spaces, split_space_inside, solver, input_array):
             solver.pop()
 
             if sat_unsat == sat:
-                vol = calc_volume(lower_limit, upper_limit)
+                vol = calc_volume(lower_limit, upper_limit, input_used_or_not)
                 vol_sum += vol
 
         else:
@@ -938,19 +955,24 @@ def evaluate_splitting(split_spaces, split_space_inside, solver, input_array):
 
 
 def split_one(space_tobe_split, no_solution_space,
-              solver, permutation_list_max, input_array):
+              solver, permutation_list_max,
+              input_array, input_used_or_not):
     """
 
-    :param space_tobe_split:
-    :param no_solution_space:
-    :param solver:
-    :param permutation_list_max:
-    :param input_array:
-    :return:
-    best_split_spaces splitした周りの空間
-    best_split_space_inside：拡張した領域の起点を含む領域
-    best_satisfiability_list：split_spacesの違反判定結果リスト
+    Args:
+        space_tobe_split:
+        no_solution_space:
+        solver:
+        permutation_list_max:
+        input_array:
+        input_used_or_not:
 
+    Returns:
+        tuple: split informations.
+
+        best_split_spaces: Space around split.
+        best_split_space_inside: A region that contains the origin of the expanded region.
+        best_satisfiability_list: Violation judgment result list of split_spaces.
     """
     space_tobe_split_lower = space_tobe_split[0]
     space_tobe_split_lower_eqsign = space_tobe_split[1]
@@ -987,11 +1009,11 @@ def split_one(space_tobe_split, no_solution_space,
     score_list = []
     split_result_list = []
 
-    for num1, permutation in enumerate(permutation_list):
+    for _, permutation in enumerate(permutation_list):
         split_spaces = []
         split_space_inside = None
 
-        for num2, (index, ul) in enumerate(permutation):
+        for p_count, (index, ul) in enumerate(permutation):
             if ul == 'l':
                 outer1_lower = space_tobe_split_lower[index]
                 outer1_lower_eqsign = space_tobe_split_lower_eqsign[index]
@@ -1002,7 +1024,8 @@ def split_one(space_tobe_split, no_solution_space,
                 elif no_sol_lower_eqsign[index] == 'without_equal':
                     outer1_upper_eqsign = 'with_equal'
                 else:
-                    print('Error: an unexpected eqsign identifier is used')
+                    print('Error: an unexpected eqsign identifier is used',
+                          file=sys.stderr)
                     assert False
 
                 if (outer1_lower != outer1_upper) or \
@@ -1021,7 +1044,7 @@ def split_one(space_tobe_split, no_solution_space,
                     new_space1_upper[index] = outer1_upper
                     new_space1_upper_eqsign[index] = outer1_upper_eqsign
 
-                    for (i2, ul2) in permutation[:num2]:
+                    for (i2, ul2) in permutation[:p_count]:
                         if i2 != index:
                             if ul2 == 'l':
                                 new_space1_lower[i2] = no_sol_lower[i2]
@@ -1030,7 +1053,8 @@ def split_one(space_tobe_split, no_solution_space,
                                 new_space1_upper[i2] = no_sol_upper[i2]
                                 new_space1_upper_eqsign[i2] = no_sol_upper_eqsign[i2]
                             else:
-                                print("ERROR: ul has an unexpected value")
+                                print("ERROR: ul has an unexpected value",
+                                      file=sys.stderr)
                                 assert False
 
                     if target_f_index == index and upper_or_lower == 'u':
@@ -1052,7 +1076,8 @@ def split_one(space_tobe_split, no_solution_space,
                 elif no_sol_upper_eqsign[index] == 'without_equal':
                     outer2_lower_eqsign = 'with_equal'
                 else:
-                    print('Error: an unexpected eqsign identifier is used')
+                    print('Error: an unexpected eqsign identifier is used',
+                          file=sys.stderr)
                     assert False
                 outer2_upper = space_tobe_split_upper[index]
                 outer2_upper_eqsign = space_tobe_split_upper_eqsign[index]
@@ -1073,7 +1098,7 @@ def split_one(space_tobe_split, no_solution_space,
                     new_space2_upper[index] = outer2_upper
                     new_space2_upper_eqsign[index] = outer2_upper_eqsign
 
-                    for (i2, ul2) in permutation[:num2]:
+                    for (i2, ul2) in permutation[:p_count]:
                         if i2 != index:
                             if ul2 == 'l':
                                 new_space2_lower[i2] = no_sol_lower[i2]
@@ -1082,7 +1107,8 @@ def split_one(space_tobe_split, no_solution_space,
                                 new_space2_upper[i2] = no_sol_upper[i2]
                                 new_space2_upper_eqsign[i2] = no_sol_upper_eqsign[i2]
                             else:
-                                print("ERROR: ul has an unexpected value")
+                                print("ERROR: ul has an unexpected value",
+                                      file=sys.stderr)
                                 assert False
 
                     if target_f_index == index and upper_or_lower == 'l':
@@ -1098,12 +1124,12 @@ def split_one(space_tobe_split, no_solution_space,
                     split_spaces.append(None)
 
             else:
-                print("ERROR: ul has an unexpected value")
+                print("ERROR: ul has an unexpected value", file=sys.stderr)
                 assert False
 
         # finish splitting for one permutation
         score, satisfiability_list = evaluate_splitting(
-            split_spaces, split_space_inside, solver, input_array)
+            split_spaces, split_space_inside, solver, input_array, input_used_or_not)
 
         score_list.append(score)
         split_result_list.append(
@@ -1118,7 +1144,7 @@ def split_one(space_tobe_split, no_solution_space,
 
 
 def split_violation_space(space, lower_limit_tmp, upper_limit_tmp,
-                          solver, vol_ratio, permutation_list_max, input_array):
+                          solver, input_array, input_used_or_not, conf):
 
     lower_eqsign = ['with_equal'] * len(space[0])
     upper_eqsign = ['with_equal'] * len(space[1])
@@ -1131,8 +1157,8 @@ def split_violation_space(space, lower_limit_tmp, upper_limit_tmp,
     loop_index = 1
 
     while check_splitting(
-            space_tobe_split, lower_limit_tmp, upper_limit_tmp, vol_ratio) and \
-            loop_index <= len(no_solution_spaces_fixed):
+            space_tobe_split, lower_limit_tmp, upper_limit_tmp, conf.vol_ratio,
+            input_used_or_not) and loop_index <= len(no_solution_spaces_fixed):
 
         no_solution_space = no_solution_spaces_fixed[-loop_index]
 
@@ -1146,7 +1172,8 @@ def split_violation_space(space, lower_limit_tmp, upper_limit_tmp,
          split_space_inside,
          satisfiability_list) = split_one(
             space_tobe_split, no_solution_space,
-            solver, permutation_list_max, input_array)
+            solver, conf.permutation_list_max,
+            input_array, input_used_or_not)
 
         split_spaces_sat = []
         split_spaces_unsat = []
@@ -1173,85 +1200,191 @@ def split_violation_space(space, lower_limit_tmp, upper_limit_tmp,
     return split_violation_spaces, no_violation_spaces
 
 
-def calc_volume(lower_limit, upper_limit):
+def calc_volume(lower_limit, upper_limit, input_used_or_not):
     vol = 1
     for index in range(len(lower_limit)):
-        len_of_side = abs(upper_limit[index] - lower_limit[index])
-        vol = vol * len_of_side
+        if input_used_or_not[index]:
+            len_of_side = abs(upper_limit[index] - lower_limit[index])
+            vol = vol * len_of_side
 
     return vol
 
 
-def print_violation(input_array, output_array, input_type,
-                    model_array, model, solver, input_name):
+def get_z3_solution(solver_model, var_array, var_type, fraction_cast=False,
+                    default=None):
+
+    solution_array = [default] * len(var_array)
+
+    for index in range(len(var_array)):
+        z3obj = solver_model[var_array[index]]
+
+        if z3obj is not None:
+
+            if 'int' in str(var_type[index]):
+                value = int(z3obj.as_long())
+
+            elif 'float' in str(var_type[index]):
+                if fraction_cast:
+                    value = float(z3obj.as_fraction())
+                else:
+                    value = z3obj.as_fraction()
+            else:
+                print("Error: input_type is not defined", file=sys.stderr)
+                assert False
+
+            solution_array[index] = value
+
+    return solution_array
+
+
+def print_violation(input_array, output_array,
+                    input_array_converted, output_array_converted, input_type,
+                    model, solver, input_name, conf):
+
     solution = solver.model()
 
     # Get z3 input
-    z3_input = []
-    for index in range(len(input_array)):
+    z3_input = get_z3_solution(solution, input_array, input_type, default=0)
+    if conf.conversion:
+        z3_input_converted = get_z3_solution(solution, input_array_converted,
+                                             input_type, default=0)
 
-        if solution[input_array[index]] is None:
-            pass
-        else:
-
-            if 'int' in str(input_type[index]):
-                value = int(solution[input_array[index]].as_long())
-                z3_input.append(value)
-
-            elif 'float' in str(input_type[index]):
-                value = float(solution[input_array[index]].as_fraction())
-                z3_input.append(value)
-
-            else:
-                print("Error: input_type is not defined")
-                assert False
+    else:
+        z3_input_converted = []
 
     # Get z3 output
-    z3_output = []
-    for index in range(len(output_array)):
-        obj = float(solution[output_array[index]].as_fraction())
-        z3_output.append(obj)
+    z3_output = get_z3_solution(solution, output_array,
+                                ['float' for _ in range(len(output_array))],
+                                fraction_cast=True, default=0)
+
+    if conf.conversion:
+        z3_output_converted = get_z3_solution(
+            solution, output_array_converted,
+            ['float' for _ in range(len(output_array_converted))],
+            fraction_cast=True, default=0)
+
+    else:
+        z3_output_converted = []
 
     # Create xgboost input
-    input_data_list = []
-    for index in range(len(input_array)):
+    input_data_list = get_z3_solution(solution, input_array, input_type,
+                                      fraction_cast=True, default=0)
 
-        if solution[input_array[index]] is None:
-            input_data_list.append(0)
-        else:
-            if 'int' in str(input_type[index]):
-                value = int(solution[input_array[index]].as_long())
-                input_data_list.append(value)
+    if conf.conversion:
+        input_data_list_converted = get_z3_solution(
+            solution, input_array_converted, input_type,
+            fraction_cast=True, default=0)
 
-            elif 'float' in str(input_type[index]):
-                value = float(solution[input_array[index]].as_fraction())
-                input_data_list.append(value)
-
-            else:
-                print("Error: input_type is not defined")
-                assert False
+    else:
+        input_data_list_converted = []
 
     pd.options.display.max_columns = None
     pd.options.display.width = 3500
     pd.options.display.precision = 12
 
-    if len(model_array) == 1:
-        # predict
-        df_input_nd = pd.DataFrame([input_data_list], columns=input_name)
-        predict_output = model.predict(df_input_nd)
-    else:
-        df_input_nd = None
-        predict_output = None
+    df_input_nd_converted = None
+    class_probs = None
+    predict_output_converted = None
+
+    # predict
+    df_input_nd = pd.DataFrame([input_data_list], columns=input_name)
+    predict_output = model.predict(df_input_nd)
+
+    if conf.conversion:
+        df_input_nd_converted = pd.DataFrame(
+            [input_data_list_converted], columns=input_name)
+        predict_output_converted = model.predict(df_input_nd_converted)
+
+    if conf.mode == _CLASSIFIER:
+        input_dmatrix = DMatrix(df_input_nd, missing=model.missing,
+                                nthread=model.n_jobs)
+        ntree_limit = getattr(model, "best_ntree_limit", 0)
+        class_probs = model.get_booster().predict(input_dmatrix,
+                                                  output_margin=False,
+                                                  ntree_limit=ntree_limit,
+                                                  validate_features=True)
 
     # z3
-    _log_writer(_LOG_MSG_INPUT_VALUE.format(_Z3, z3_input), log_file)
-    _log_writer(_LOG_MSG_OUTPUT_VALUE.format(_Z3, z3_output), log_file)
+    _log_writer(_LOG_MSG_DEBUG_INPUT_VALUE.format(_Z3, z3_input), log_file)
+    _log_writer(_LOG_MSG_INPUT_VALUE.format(
+        _Z3, '\n' + str(pd.DataFrame(
+            [[float(value) if isinstance(value, Fraction) else value
+              for value in z3_input]], columns=input_name))), log_file)
+
+    if conf.conversion:
+        _log_writer("", log_file)
+        _log_writer(_LOG_MSG_DEBUG_INPUT_VALUE.format(
+            _Z3 + "(Converted)", z3_input_converted), log_file)
+        _log_writer(_LOG_MSG_INPUT_VALUE.format(
+            _Z3 + "(Converted)",
+            '\n' + str(pd.DataFrame(
+                [[float(value) if isinstance(value, Fraction) else value
+                 for value in z3_input_converted]], columns=input_name))),
+            log_file)
+
+    _log_writer("", log_file)
+
+    if conf.mode == _REGRESSOR:
+        _log_writer(_LOG_MSG_OUTPUT_VALUE.format(_Z3, z3_output), log_file)
+        if conf.conversion:
+            _log_writer("", log_file)
+            _log_writer(_LOG_MSG_OUTPUT_VALUE.format(
+                _Z3 + "(Converted)", z3_output_converted), log_file)
+    else:
+        _log_writer(
+            _LOG_MSG_OUTPUT_VALUE.format(
+                _Z3,
+                "probability: {0}, class: {1}".format(
+                    soft_max(z3_output), _get_category_output(z3_output))),
+            log_file)
+
+    _log_writer("", log_file)
 
     # xgboost
     _log_writer(_LOG_MSG_INPUT_VALUE.format(
         _XGBOOST, '\n' + str(df_input_nd)), log_file)
-    _log_writer(_LOG_MSG_OUTPUT_VALUE.format(
-        _XGBOOST, predict_output), log_file)
+
+    if conf.conversion:
+        _log_writer("", log_file)
+        _log_writer(_LOG_MSG_INPUT_VALUE.format(
+            _XGBOOST + "(Converted)", '\n' + str(df_input_nd_converted)),
+            log_file)
+
+    _log_writer("", log_file)
+
+    if conf.mode == _REGRESSOR:
+        _log_writer(
+            _LOG_MSG_OUTPUT_VALUE.format(_XGBOOST, predict_output), log_file)
+
+        if conf.conversion:
+            _log_writer("", log_file)
+            _log_writer(
+                _LOG_MSG_OUTPUT_VALUE.format(
+                    _XGBOOST + "(Converted)", predict_output_converted),
+                log_file)
+
+    else:
+        _log_writer(_LOG_MSG_OUTPUT_VALUE.format(
+            _XGBOOST,
+            "probability: {0}, class: {1}".format(class_probs, predict_output)),
+            log_file
+        )
+
+    _log_writer("", log_file)
+
+
+def soft_max(value):
+    # softmax
+    exp_z3_x = np.exp([value])
+    return exp_z3_x / np.sum(np.exp([value]), axis=1, keepdims=True)
+
+
+def _get_category_output(z3_outputs):
+    # softmax
+    z3_y = soft_max(z3_outputs)
+
+    # Return argmax
+    return np.argmax(z3_y)
 
 
 def _check_keys(keys, data):
@@ -1331,7 +1464,7 @@ def _load_data_list(data_list_path):
 
 
 def _is_empty_file(file_path):
-    with open(file_path, 'r') as rs:
+    with open(file_path, 'r', encoding="utf-8") as rs:
         line = rs.readline()
 
     return line == ''
@@ -1358,141 +1491,23 @@ def _get_conf_path_value(conf_dir, key, data_list):
 
     return val
 
-
-def _load_config(config_path):
-    if not Path(config_path).exists():
-        raise FileNotFoundError("{} is not found".format(config_path))
-
-    conf_dir = Path(config_path).absolute().parent
-
-    with open(config_path, 'r') as rs:
-        data_list = json.load(rs)
-
-    # Check config format and get value
-    if not isinstance(data_list, dict):
-        raise TypeError('config type is dict')
-
-    # Get search range ratio
-    if _SEARCH_RANGE_RATIO not in data_list:
-        search_range_ratio = 100
-
-    elif not (
-            isinstance(data_list[_SEARCH_RANGE_RATIO], int) or
-            isinstance(data_list[_SEARCH_RANGE_RATIO], float)):
-        raise TypeError('"{}" type is int or float'.format(_SEARCH_RANGE_RATIO))
-    else:
-        search_range_ratio = data_list[_SEARCH_RANGE_RATIO]
-
-    if search_range_ratio <= 1:
-        raise ValueError('"{}" must greater 1'.format(_SEARCH_RANGE_RATIO))
-
-    # Get buffer range ratio
-    if _BUFFER_RANGE_RATIO not in data_list:
-        buff_range_ratio = None
-
-    elif not (
-            isinstance(data_list[_BUFFER_RANGE_RATIO], int) or
-            isinstance(data_list[_BUFFER_RANGE_RATIO], float)):
-        raise TypeError(
-            '"{}" type is int or float'.format(_BUFFER_RANGE_RATIO))
-    else:
-        buff_range_ratio = data_list[_BUFFER_RANGE_RATIO]
-
-    if buff_range_ratio == 0:
-        buff_range_ratio = None
-
-    # Get Property file path
-    prop_path = _get_conf_path_value(conf_dir, _PROP_PATH, data_list)
-
-    # Get Data list file path
-    data_list_path = _get_conf_path_value(conf_dir, _DATA_LIST_PATH, data_list)
-
-    # Get Condition file path
-    if _COND_PATH not in data_list:
-        cond_path = None
-
-    else:
-        cond_path = _get_conf_path_value(conf_dir, _COND_PATH, data_list)
-
-    # Get System Time out
-    if _SYSTEM_TIMEOUT not in data_list:
-        system_time_out = None
-    elif not (
-            isinstance(data_list[_SYSTEM_TIMEOUT], int) or
-            isinstance(data_list[_SYSTEM_TIMEOUT], float)):
-        raise TypeError('"{}" type is int or float'.format(_SYSTEM_TIMEOUT))
-
-    else:
-        system_time_out = data_list[_SYSTEM_TIMEOUT]
-
-    # Get Search Function Time out
-    if _SEARCH_TIMEOUT not in data_list:
-        search_time_out = None
-    elif not (
-            isinstance(data_list[_SEARCH_TIMEOUT], int) or
-            isinstance(data_list[_SEARCH_TIMEOUT], float)):
-        raise TypeError('"{}" type is int or float'.format(_SEARCH_TIMEOUT))
-
-    else:
-        search_time_out = data_list[_SEARCH_TIMEOUT]
-
-    # Get Extend Arg
-    if _EXTEND_ARG not in data_list:
-        extend_arg = _SEPARATE
-
-    elif data_list[_EXTEND_ARG] not in [_SEPARATE, _SAMETIME]:
-        raise ValueError('"{0}" value is "{1}" or "{2}"'.format(
-            _EXTEND_ARG, _SEPARATE, _SAMETIME))
-    else:
-        extend_arg = data_list[_EXTEND_ARG]
-
-    # Get splitting switch
-    if _SPLITTING not in data_list:
-        splitting = False
-
-    elif not isinstance(data_list[_SPLITTING], bool):
-        raise TypeError('"{}" type is bool'.format(_SPLITTING))
-    else:
-        splitting = data_list[_SPLITTING]
-
-    if splitting:
-        # Get vol ratio
-        if _VOL_RATIO not in data_list:
-            vol_ratio = 100
-
-        elif not (
-                isinstance(data_list[_VOL_RATIO], int) or
-                isinstance(data_list[_VOL_RATIO], float)):
-            raise TypeError('"{}" type is int or float'.format(_VOL_RATIO))
-        else:
-            vol_ratio = data_list[_VOL_RATIO]
-
-        # Get permutation list_max
-        if _PERMUTATION_LIST_MAX not in data_list:
-            permutation_list_max = 10
-
-        elif not (
-                isinstance(data_list[_PERMUTATION_LIST_MAX], int) or
-                isinstance(data_list[_PERMUTATION_LIST_MAX], float)):
-            raise TypeError('"{}" type is int or float'.format(_PERMUTATION_LIST_MAX))
-        else:
-            permutation_list_max = data_list[_PERMUTATION_LIST_MAX]
-    else:
-        vol_ratio = None
-        permutation_list_max = None
-
-    return (search_range_ratio, buff_range_ratio,
-            data_list_path, prop_path, cond_path,
-            system_time_out, search_time_out, extend_arg,
-            splitting, vol_ratio, permutation_list_max)
+_LOG_OFF = False
 
 
 def _log_writer(msg, out_stream=sys.stdout):
     if isinstance(out_stream, list):
         for out in out_stream:
-            print(msg, file=out, flush=True)
+            if _LOG_OFF:
+                if out == sys.stdout:
+                    print(msg, file=out, flush=True)
+            else:
+                print(msg, file=out, flush=True)
     else:
-        print(msg, file=out_stream, flush=True)
+        if _LOG_OFF:
+            if out_stream == sys.stdout:
+                print(msg, file=out_stream, flush=True)
+        else:
+            print(msg, file=out_stream, flush=True)
 
 
 def print_extent(lower_extent, upper_extent,
@@ -1501,7 +1516,16 @@ def print_extent(lower_extent, upper_extent,
 
     _log_writer('Range:', [log_file, sys.stdout])
     for index in range(len(upper_extent)):
-        if input_used_or_not[index]:
+        # if input_used_or_not[index]:
+        if isinstance(lower_extent[index], Fraction) or isinstance(upper_extent[index], Fraction):
+            _log_writer(
+                '  {0} : {1} ({2})<= to <= {3} ({4})'.format(
+                    input_name[index],
+                    lower_extent[index], float(lower_extent[index]),
+                    upper_extent[index], float(upper_extent[index])),
+                [log_file, sys.stdout]
+            )
+        else:
             _log_writer(
                 '  {0} : {1} <= to <= {2}'.format(
                     input_name[index],
@@ -1531,28 +1555,300 @@ def print_split_spaces(split_space):
         _log_writer('None', [sys.stdout, log_file])
 
 
-def main(models, dataset=None, config_path=None):
+def check_violation_range(solver, violation_spaces_list,
+                          input_array, input_name, upper_extent, lower_extent):
+
+    if len(violation_spaces_list) is 0:
+        return True
+
+    solver.push()
+    try:
+        for violation_spaces in violation_spaces_list:
+            not_constraint_extent = Not(
+                And(
+                    And([input_array[i] <= violation_spaces[1][i]
+                         for i in range(len(input_array))]),
+                    And([input_array[i] >= violation_spaces[0][i]
+                         for i in range(len(input_array))])
+                )
+            )
+            solver.add(not_constraint_extent)
+
+        constraint_extent = And(
+            And([input_array[i] <= upper_extent[i]
+                 for i in range(len(input_array))]),
+            And([input_array[i] >= lower_extent[i]
+                 for i in range(len(input_array))])
+        )
+        solver.add(constraint_extent)
+
+        r = check_solver(solver)
+        if r == unsat:
+            _log_writer("The range of the violation is completely covered",
+                        [sys.stderr, log_file])
+
+            print_extent(lower_extent, upper_extent, input_name, None)
+
+            return False
+
+    finally:
+        solver.pop()
+
+    return True
+
+
+def add_regressor(solver, sub_c_array, model_index, base_score, conversion=False):
+    output_array = []
+    c_sum = add_trees_relation_regressor(
+        sub_c_array, solver, conversion=conversion)
+
+    if not conversion:
+        output_array.append(Real(_OUTPUT + str(model_index)))
+    else:
+        output_array.append(
+            Real(_OUTPUT_CONVERTED + str(model_index)))
+    solver.add(
+        output_array[model_index] == (c_sum + base_score))
+
+    return output_array
+
+
+def add_conversion(input_array, output_array,
+                   input_array_converted, output_array_converted,
+                   solver, conv_path, conv_name):
+    spec = iu.spec_from_file_location(conv_name, conv_path)
+    module = iu.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    exec('{0} = getattr(module, "{0}")'.format(conv_name))
+
+    exec('convert_x = {0}(input_array)'.format(conv_name))
+
+    print_solver = Solver()
+    for i in range(len(input_array)):
+        conv_exp = eval('convert_x[i] == input_array_converted[i]')
+        solver.add(conv_exp)
+        print_solver.add(conv_exp)
+
+    _log_writer('===== conversion constraints =====', log_file)
+    _log_writer(print_solver.sexpr(), log_file)
+
+    del print_solver
+
+
+class ConfInfo(object):
+
+    def __init__(self, path):
+        if not Path(path).exists():
+            raise FileNotFoundError("{} is not found".format(path))
+
+        self.conf_dir = Path(path).absolute().parent
+        self.path = path
+
+        # set default values
+        self.search_range_ratio = 100
+        self.buffer_range_ratio = None
+        self.data_list_path = None
+        self.prop_path = None
+        self.cond_path = None
+        self.system_time_out = None
+        self.search_time_out = None
+        self.extend_arg = _SEPARATE
+        self.splitting = False
+        self.vol_ratio = None
+        self.permutation_list_max = None
+        self.mode = _REGRESSOR
+        self.conversion = False
+        self.conv_file_path = None
+        self.conv_func_name = None
+
+        self.load_config()
+
+    def load_config(self):
+        with open(self.path, 'r') as rs:
+            data_list = json.load(rs)
+
+        # Check config format and get value
+        if not isinstance(data_list, dict):
+            raise TypeError('config type is dict')
+
+        # Get search range ratio
+        if _SEARCH_RANGE_RATIO in data_list:
+            self.search_range_ratio = data_list[_SEARCH_RANGE_RATIO]
+
+            if not (isinstance(self.search_range_ratio, int)
+                    or isinstance(self.search_range_ratio, float)):
+                raise TypeError(
+                    '"{}" type is int or float'.format(_SEARCH_RANGE_RATIO))
+
+        if self.search_range_ratio <= 1:
+            raise ValueError('"{}" must greater 1'.format(_SEARCH_RANGE_RATIO))
+
+        # Get buffer range ratio
+        if _BUFFER_RANGE_RATIO in data_list:
+            self.buffer_range_ratio = data_list[_BUFFER_RANGE_RATIO]
+
+            if not (isinstance(data_list[_BUFFER_RANGE_RATIO], int)
+                    or isinstance(data_list[_BUFFER_RANGE_RATIO], float)):
+                raise TypeError(
+                    '"{}" type is int or float'.format(_BUFFER_RANGE_RATIO))
+
+        if self.buffer_range_ratio == 0:
+            self.buffer_range_ratio = None
+
+        # Get Property file path
+        self.prop_path = _get_conf_path_value(
+            self.conf_dir, _PROP_PATH, data_list)
+
+        # Get Data list file path
+        self.data_list_path = _get_conf_path_value(
+            self.conf_dir, _DATA_LIST_PATH, data_list)
+
+        # Get Condition file path
+        if _COND_PATH in data_list:
+            self.cond_path = _get_conf_path_value(
+                self.conf_dir, _COND_PATH, data_list)
+
+        # Get System Time out
+        if _SYSTEM_TIMEOUT in data_list:
+            self.system_time_out = data_list[_SYSTEM_TIMEOUT]
+
+            if not (isinstance(self.system_time_out, int)
+                    or isinstance(self.system_time_out, float)):
+                raise TypeError(
+                    '"{}" type is int or float'.format(_SYSTEM_TIMEOUT))
+
+        # Get Search Function Time out
+        if _SEARCH_TIMEOUT in data_list:
+            self.search_time_out = data_list[_SEARCH_TIMEOUT]
+
+            if not (isinstance(self.search_time_out, int)
+                    or isinstance(self.search_time_out, float)):
+                raise TypeError(
+                    '"{}" type is int or float'.format(_SEARCH_TIMEOUT))
+
+        # Get Extend Arg
+        if _EXTEND_ARG in data_list:
+            self.extend_arg = data_list[_EXTEND_ARG]
+
+        if self.extend_arg not in [_SEPARATE, _SAMETIME]:
+            raise ValueError('"{0}" value is "{1}" or "{2}"'.format(
+                _EXTEND_ARG, _SEPARATE, _SAMETIME))
+
+        # Get splitting switch
+        self.splitting = data_list.get(_SPLITTING, False)
+
+        if not isinstance(self.splitting, bool):
+            raise TypeError('"{}" type is bool'.format(_SPLITTING))
+
+        if self.splitting:
+            # Get vol ratio
+            if _VOL_RATIO not in data_list:
+                self.vol_ratio = 100
+
+            elif not (isinstance(data_list[_VOL_RATIO], int)
+                      or isinstance(data_list[_VOL_RATIO], float)):
+                raise TypeError('"{}" type is int or float'.format(_VOL_RATIO))
+
+            else:
+                self.vol_ratio = data_list[_VOL_RATIO]
+
+            # Get permutation list_max
+            if _PERMUTATION_LIST_MAX not in data_list:
+                self.permutation_list_max = 10
+
+            elif not (isinstance(data_list[_PERMUTATION_LIST_MAX], int)
+                      or isinstance(data_list[_PERMUTATION_LIST_MAX], float)):
+                raise TypeError(
+                    '"{}" type is int or float'.format(_PERMUTATION_LIST_MAX))
+            else:
+                self.permutation_list_max = data_list[_PERMUTATION_LIST_MAX]
+
+        # Get Mode (default regressor)
+        if _MODE in data_list:
+            self.mode = data_list[_MODE]
+
+            if self.mode not in [_REGRESSOR, _CLASSIFIER]:
+                raise ValueError('"{0}" value is "{1}" or "{2}"'.format(
+                    _MODE, _REGRESSOR, _CLASSIFIER))
+
+        # Get conversion
+        self.conversion = data_list.get(_CONVERSION, False)
+
+        if not isinstance(self.conversion, bool):
+            raise TypeError('"{}" type is bool'.format(_CONVERSION))
+
+        if self.conversion:
+            if _CONV_PATH in data_list and _CONV_NAME in data_list:
+                self.conv_file_path = _get_conf_path_value(
+                    self.conf_dir, _CONV_PATH, data_list)
+                self.conv_func_name = data_list[_CONV_NAME]
+
+            else:
+                raise ValueError(
+                    'Both "{0}" and "{1}" need to be defined.'.format(
+                        _CONV_PATH, _CONV_NAME
+                    ))
+
+    def __str__(self):
+
+        str_list = []
+        str_format = "{0} : {1}"
+        str_list.append(str_format.format(_SEARCH_RANGE_RATIO,
+                                          self.search_range_ratio))
+        str_list.append(str_format.format(_BUFFER_RANGE_RATIO,
+                                          self.buffer_range_ratio))
+        str_list.append(str_format.format(_DATA_LIST_PATH, self.data_list_path))
+        str_list.append(str_format.format(_PROP_PATH, self.prop_path))
+        str_list.append(str_format.format(_COND_PATH, self.cond_path))
+        str_list.append(str_format.format(_SYSTEM_TIMEOUT,
+                                          self.system_time_out))
+        str_list.append(str_format.format(_SEARCH_TIMEOUT,
+                                          self.search_time_out))
+        str_list.append(str_format.format(_EXTEND_ARG,  self.extend_arg))
+        str_list.append(str_format.format(_SPLITTING, self.splitting))
+        str_list.append(str_format.format(_VOL_RATIO, self.vol_ratio))
+        str_list.append(str_format.format(_PERMUTATION_LIST_MAX,
+                                          self.permutation_list_max))
+        str_list.append(str_format.format(_MODE, self.mode))
+        str_list.append(str_format.format(_CONVERSION, self.conversion))
+        str_list.append(str_format.format(_CONV_PATH, self.conv_file_path))
+        str_list.append(str_format.format(_CONV_NAME, self.conv_func_name))
+
+        return '\n'.join(str_list) + '\n'
+
+
+def main(model_paths, dataset, config_path):
+
+    if model_paths is None or config_path is None:
+        raise ArgumentError("")
+
     cur_dir = Path(__file__).absolute().parent
 
     start_time = time.time()
 
     time_id = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     log_dir = cur_dir.joinpath("log", str(time_id + 'log'))
+    log_count = 0
     if not log_dir.exists():
         log_dir.mkdir(parents=True, exist_ok=True)
-    log_file_name = str(log_dir.joinpath('log_file.txt'))
+    log_file_name = str(log_dir.joinpath('log_file_{0}.txt'.format(log_count)))
 
     try:
         global log_file
         log_file = open(log_file_name, 'a', encoding='utf-8')
 
-        (search_range_ratio, buff_range_ratio,
-         data_list_path, prop_path, cond_path,
-         system_time_out, search_time_out, extend_arg,
-         splitting, vol_ratio, permutation_list_max) = _load_config(config_path)
+        # Load config
+        conf = ConfInfo(config_path)
+
+        _log_writer(str(conf), [sys.stdout, log_file])
 
         (input_name, output_name, cont_value_flag,
-         input_type, uppers, lowers) = _load_data_list(data_list_path)
+         input_type, uppers, lowers) = _load_data_list(conf.data_list_path)
+
+        if conf.mode == _REGRESSOR and len(output_name) != 1:
+            raise ValueError(
+                "The number of models and "
+                "the number of outputs are different.")
 
         lower_limit, upper_limit = cast_upperlower(lowers, uppers, input_type)
 
@@ -1566,124 +1862,167 @@ def main(models, dataset=None, config_path=None):
 
         input_array = dec_exp_vars_rev(input_type)
 
+        if conf.conversion:
+            input_array_converted = dec_exp_vars_rev(
+                input_type, conversion=True)
+        else:
+            input_array_converted = []
+
         for index, name in enumerate(input_name):
             print('{0} : {1} : {2}'.format(input_array[index], name,
                                            input_type[index]))
 
-        model_array = []
-        model_name_array = models
-        for model_name in model_name_array:
-            with open(model_name, 'rb') as model_file:
-                model_array.append(pickle.load(model_file))
-
-        if len(model_array) != len(output_name):
-            print("データ数不整合4", file=sys.stderr)
-            assert False
+        with open(model_paths, 'rb') as model_file:
+            model = pickle.load(model_file)
 
         solver = Solver()
 
         output_array = []
-        sub_c_array_array = []
-        c_sum_array = []
+        output_array_converted = []
         input_used_or_not = [False] * len(input_array)
 
-        for model_index, model in enumerate(model_array):
+        if False:
+            model = model.best_estimator_
+            booster = model.get_booster()
 
-            if False:
-                model = model.best_estimator_
-                booster = model.get_booster()
+        else:
+            booster = model.get_booster()
 
-            else:
-                booster = model.get_booster()
+        # model dump(json)
+        tree_tmp_dir = cur_dir.joinpath('tree_tmp')
+        if not tree_tmp_dir.exists():
+            tree_tmp_dir.mkdir(parents=True, exist_ok=True)
 
-            tree_tmp_dir = cur_dir.joinpath('tree_tmp')
-            if not tree_tmp_dir.exists():
-                tree_tmp_dir.mkdir(parents=True, exist_ok=True)
-            tree_name = str(tree_tmp_dir.joinpath(
-                'tree_' + str(model_index) + '.json'))
-            dump_model(booster, tree_name, dump_format="json")
+        tree_name = str(tree_tmp_dir.joinpath('tree.json'))
+        booster.dump_model(tree_name, dump_format='json')
 
-            # for num in range(len(booster.get_dump())):
-            #     graph1 = xgb.to_graphviz(model, num_trees=num)
-            #     graph1.format = 'png'
-            #     graph1.render('tree_' + str(num))
+        # for num in range(
+        #         len(booster.get_dump(tree_name, dump_format='json'))):
+        #     graph1 = xgb.to_graphviz(model, num_trees=num)
+        #     graph1.format = 'png'
+        #     graph1.render('tree_' + str(num))
 
-            with open(tree_name, 'r') as fjson:
-                djson = json.load(fjson)
+        # load model information(json)
+        with open(tree_name, 'r') as fjson:
+            djson = json.load(fjson)
 
-            for tree in djson:
-                input_name_replacer(tree, input_name)
+        for tree in djson:
+            input_name_replacer(tree, input_name)
 
-            sub_c_array = add_trees_consts_to_solver(djson, input_array,
-                                                     input_type, solver,
-                                                     input_used_or_not)
-            sub_c_array_array.append(sub_c_array)
+        # Add trees consts
+        sub_c_array = add_trees_consts_to_solver(djson, input_array,
+                                                 input_type, solver,
+                                                 input_used_or_not)
+        # Get model base score
+        base_score = model.get_xgb_params()['base_score']
 
+        if conf.mode == _REGRESSOR:
             c_sum = add_trees_relation_regressor(sub_c_array, solver)
-            c_sum_array.append(c_sum)
 
-            base_score = model.get_xgb_params()['base_score']
+            output_array.append(Real(_OUTPUT))
+            solver.add(output_array[0] == (c_sum + base_score))
 
-            output_array.append(Real(_OUTPUT + str(model_index)))
-            solver.add(
-                output_array[model_index] == (
-                            c_sum_array[model_index] + base_score))
+            # convert
+            if conf.conversion:
+                sub_c_array_converted = add_trees_consts_to_solver(
+                    djson, input_array_converted, input_type, solver,
+                    input_used_or_not,
+                    conversion=True)
 
+                c_sum_converted = add_trees_relation_regressor(
+                    sub_c_array_converted, solver, conversion=True)
+
+                output_array_converted.append(Real(_OUTPUT_CONVERTED))
+                solver.add(
+                    output_array_converted[0] == (c_sum_converted + base_score)
+                )
+
+                add_conversion(
+                    input_array, output_array,
+                    input_array_converted, output_array_converted,
+                    solver, conf.conv_file_path, conf.conv_func_name)
+
+        else:
+            # classifier
+            category = len(output_name)
+            output_array = [Real(_OUTPUT + str(i)) for i in range(category)]
+            add_trees_relation_classifier(
+                output_array, sub_c_array, category, base_score, solver)
+
+        # Warning not used variables
         for index, or_not in enumerate(input_used_or_not):
             if or_not is False:
                 _log_writer(_LOG_MSG_WARN_VARIAVLES.format(input_name[index]),
                             [sys.stdout, log_file])
 
-        add_property(input_array, output_array, input_name, output_name,
-                     solver, prop_path)
+        # Add property
+        add_property(
+            input_array, output_array,
+            input_array_converted, output_array_converted,
+            input_name, output_name, solver, conf.prop_path)
 
+        # Add upper, lower limit
         add_upperlower_constraints(input_array, solver,
                                    upper_limit, lower_limit)
 
-        if cond_path:
+        if conf.cond_path:
+            # Add other constraints
             add_other_constraints(input_array, output_array,
                                   input_name, output_name,
-                                  solver, cond_path)
+                                  solver, conf.cond_path)
 
         solver.push()
 
         violation_spaces_list = []
         violation_num = 0
 
+        summary_extent = []
+
         while True:
             print("\nVerification Starts")
             satisfiability = check_solver(solver)
 
             if satisfiability == sat:
-                print('Violating input value exists')
                 violation_num += 1
+                print('Violating input value exists: {}th'.format(violation_num))
 
                 _log_writer(
                     'Range Extraction Starts', [log_file, sys.stdout])
-                print_violation(input_array, output_array, input_type,
-                                model_array, model, solver, input_name)
+                print_violation(input_array, output_array,
+                                input_array_converted, output_array_converted,
+                                input_type, model, solver, input_name, conf)
 
                 (lower_extent, upper_extent, no_solution_spaces_fixed,
                  time_out_flag, diff_list) = find_extents_rev(
                     solver, model, lower_limit, upper_limit,
-                    input_array, output_array, input_type,
-                    model_array, cont_value_flag,
-                    search_range_ratio,
-                    input_name, input_used_or_not,
-                    start_time, system_time_out, search_time_out, extend_arg)
+                    input_array, output_array,
+                    input_array_converted, output_array_converted, input_type,
+                    cont_value_flag,
+                    input_name, input_used_or_not, start_time, conf
+                )
+
+                # Check violation range
+                if not check_violation_range(solver, violation_spaces_list,
+                                             input_array, input_name,
+                                             upper_extent, lower_extent):
+                    break
 
                 print_extent(
                     lower_extent, upper_extent, input_name, input_used_or_not)
+
+                summary_extent.append((lower_extent, upper_extent))
 
                 if time_out_flag:
                     return
 
                 buff_list = []
 
-                if buff_range_ratio is not None:
+                if conf.buffer_range_ratio is not None:
                     for index in range(len(input_array)):
                         buff = calc_diff(lower_limit[index], upper_limit[index],
-                                         input_type[index], buff_range_ratio)
+                                         input_type[index],
+                                         conf.buffer_range_ratio)
+
                         buff_list.append(buff)
 
                     for index, buff in enumerate(buff_list):
@@ -1695,11 +2034,12 @@ def main(models, dataset=None, config_path=None):
                      tuple(upper_extent),
                      tuple(no_solution_spaces_fixed)))
 
-                constraint_extent = And(And(
-                    [input_array[i] <= upper_extent[i] for i in
-                     range(len(input_array))]),
-                    And([input_array[i] >= lower_extent[i] for i
-                         in range(len(input_array))]))
+                constraint_extent = And(
+                    And([input_array[i] <= upper_extent[i]
+                         for i in range(len(input_array))]),
+                    And([input_array[i] >= lower_extent[i]
+                         for i in range(len(input_array))])
+                )
 
                 solver.add(
                     Not(constraint_extent))
@@ -1708,20 +2048,27 @@ def main(models, dataset=None, config_path=None):
                 print('No violating input value exists')
                 break
 
+            # 10M >= log size, Next file
+            if os.path.getsize(log_file_name) >= 10 * 1024 * 1024:
+                log_file.close()
+                log_count = log_count + 1
+                log_file_name = str(
+                    log_dir.joinpath('log_file_{0}.txt'.format(log_count)))
+
+                log_file = open(log_file_name, 'a', encoding='utf-8')
+
         solver.pop()
 
         _log_writer("\nThe number of the violations ranges is {0}\n".format(
             violation_num), [sys.stdout, log_file])
 
-        if splitting and extend_arg == _SEPARATE:
+        if conf.splitting and conf.extend_arg == _SEPARATE:
             split_result_list = []
 
             print('\nSplitting Starts')
 
             if len(violation_spaces_list) > 0:
 
-                _log_writer(
-                    '===============Proposed method===============', log_file)
                 for num, space in enumerate(violation_spaces_list):
 
                     print('Splitting {0}th violation range'.format(num))
@@ -1729,7 +2076,7 @@ def main(models, dataset=None, config_path=None):
                     (split_violation_spaces,
                      split_no_violation_spaces) = split_violation_space(
                         space, lower_limit, upper_limit, solver,
-                        vol_ratio, permutation_list_max, input_array)
+                        input_array, input_used_or_not, conf)
 
                     split_result = (
                         split_violation_spaces, split_no_violation_spaces)
@@ -1738,10 +2085,24 @@ def main(models, dataset=None, config_path=None):
         solver.reset()
 
         elapsed_time = time.time() - start_time
-        _log_writer('\n====================Result==============',
+
+        log_file.close()
+        log_file_name = str(
+            log_dir.joinpath('log_file_result.txt'))
+
+        log_file = open(log_file_name, 'a', encoding='utf-8')
+
+        _log_writer('\n===============Result===============',
                     [sys.stdout, log_file])
 
-        if splitting and extend_arg == _SEPARATE:
+        # print summary extent
+        for i, (le, ue) in enumerate(summary_extent):
+            _log_writer("# {0}".format(i), [sys.stdout, log_file])
+            print_extent(
+                le, ue, input_name, input_used_or_not)
+            _log_writer("", [sys.stdout, log_file])
+
+        if conf.splitting and conf.extend_arg == _SEPARATE:
             logging_split_result(violation_spaces_list, split_result_list,
                                  input_name, input_used_or_not)
 
@@ -1778,7 +2139,7 @@ def logging_split_result(violation_spaces_list, split_result_list,
 
         _log_writer(
             '\n===============Space to be split %d===============' % num,
-            [log_file])
+            [sys.stdout, log_file])
         print_extent(space_before_splitting_lower,
                      space_before_splitting_upper,
                      input_name, input_used_or_not)
@@ -1790,14 +2151,15 @@ def logging_split_result(violation_spaces_list, split_result_list,
             print_split_spaces(elm)
 
         before_volume = calc_volume(space_before_splitting_lower,
-                                    space_before_splitting_upper)
+                                    space_before_splitting_upper,
+                                    input_used_or_not)
         _log_writer(
             '\n===============Before splitting Volume===============\n'
             '{}\n'.format(before_volume), [sys.stdout, log_file])
 
         split_volume_sum = 0
         for i, elm in enumerate(split_result[0]):
-            split_volume = calc_volume(elm[0], elm[2])
+            split_volume = calc_volume(elm[0], elm[2], input_used_or_not)
             split_volume_sum = split_volume_sum + split_volume
             _log_writer(
                 '===============After splitting Volume {0}===============\n'
@@ -1807,6 +2169,14 @@ def logging_split_result(violation_spaces_list, split_result_list,
             '===============After splitting Volume Sum===============\n'
             '{}\n'.format(split_volume_sum), [sys.stdout, log_file])
 
-        _log_writer(
-            'After splitting Volume Sum / Before splitting Volume : {}\n'.format(
-                split_volume_sum / before_volume, [sys.stdout, log_file]))
+        if split_volume_sum > 0 and before_volume > 0:
+            _log_writer(
+                'After splitting Volume Sum / Before splitting Volume : {}\n'.format(
+                    split_volume_sum / before_volume), [sys.stdout, log_file])
+
+
+if __name__ == '__main__':
+    model_path = sys.argv[1]
+    conf_path = sys.argv[2]
+
+    main(model_path, None, conf_path)

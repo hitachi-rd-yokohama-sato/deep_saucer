@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import re
 
 from z3 import *
 
@@ -67,7 +68,8 @@ def _generate_parser():
     real = pp.Combine(pp.Word(pp.nums) + "." + pp.Word(pp.nums))
     exponent = pp.Regex(r"[+-]?\d+(:?\.\d*)?(:?[eE][+-]?\d+)?")
     variable = pp.Word(pp.alphanums + "_")
-    operand = exponent | real | integer | variable | pp.quotedString | pp.dblQuotedString
+    conv_variable = pp.Combine('#' + variable + '#')
+    operand = exponent | real | integer | conv_variable | variable | pp.quotedString | pp.dblQuotedString
 
     sign_op = pp.oneOf('+ -')
     mult_op = pp.oneOf('* / %')
@@ -161,7 +163,6 @@ def parse_constraint(property_path, input_names, output_names):
     with open(property_path, 'r') as f:
         express_list = []
         for line in f:
-            # 1行毎に内容をパースする
             express = _make_express_replace_names(
                 parser.parseString(line).asList()[0], input_names, output_names)
             express_list.append(express)
@@ -173,7 +174,7 @@ def _make_express_replace_names(parse_list, input_names, output_names=None):
     ret_str = ""
 
     if len(parse_list) == 1 and isinstance(parse_list[0], str):
-            ret_str = parse_list[0]
+        ret_str = parse_list[0]
 
     else:
 
@@ -192,6 +193,16 @@ def _make_express_replace_names(parse_list, input_names, output_names=None):
                 elif output_names is not None and sub_str in output_names:
                     sub_str = 'output_array[{}]'.format(
                         output_names.index(sub_str))
+                else:
+                    match_conv = re.match('#(.+)#', sub_str)
+                    if match_conv:
+                        v_name = match_conv.group(1)
+                        if v_name in input_names:
+                            sub_str = 'input_array_converted[{}]'.format(
+                                input_names.index(v_name))
+                        elif output_names is not None and v_name in output_names:
+                            sub_str = 'output_array_converted[{}]'.format(
+                                output_names.index(v_name))
 
             if flg:
                 sub_str = sub_str + ')'
