@@ -1,5 +1,5 @@
 {
   "NameList": "../model/train_name.json",
-  "Prop": "../express/express_sat.txt",
+  "Prop": "../express/express_unsat.txt",
   "Condition": "../condition/condition.txt"
 }
